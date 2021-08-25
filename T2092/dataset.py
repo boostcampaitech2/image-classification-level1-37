@@ -1,27 +1,43 @@
+
+import torchvision
+import torch
 import numpy as np
 import pandas as pd
 from PIL import Image
-import matplotlib as mpl
 import matplotlib.pyplot as plt
 from tqdm.notebook import tqdm
 from glob import glob
 import os
 from torch.utils.data import Dataset, DataLoader
+%matplotlib inline
 
-class cfg:
+
+
+class cfg_train:
     data_dir = '/opt/ml/input/data/train'
-    img_dir = f'{data_dir}/images'
-    df_path = f'{data_dir}/train.csv'
+    img_dir = 'images'
+    df_path = 'train.csv'
+class cfg_test:
+    data_dir = '/opt/ml/input/data/eval'
+    img_dir = 'images'
+    df_path = 'info.csv'
 
 class CustomDataset(Dataset):
-    def __init__(self, path, drop_features, train=True, transform = None):
+    def __init__(self, path, df_path, train=True, transform = None):
         self.path = path
         self.transform = transform
-        self.df = pd.read_csv(os.path.join(self.path, 'train.csv')).drop(drop_features, axis=1)
-        self.DF = self._getlabel(os.path.join(self.path, 'images'), self.df.values)
-        self.X = self.DF['ImageID'].values
-        self.y = self.DF['ans'].values
-        self.DF.to_csv(path_or_buf = os.path.join(cfg.data_dir,"labeling.csv"), index=False)
+        self.train = train
+        if self.train == True:
+            self.df = pd.read_csv(os.path.join(self.path, df_path)).drop(['id','race'], axis=1)
+            self.DF = self._getlabel(os.path.join(self.path, 'images'), self.df.values)
+            self.X = self.DF['ImageID'].values
+            self.y = self.DF['ans'].values
+            self.DF.to_csv(path_or_buf = os.path.join(self.path,"labeling.csv"), index=False)
+        else:
+            self.df = pd.read_csv(os.path.join(self.path, df_path)).drop('ans', axis=1)
+            self.X = self.df.values.squeeze()
+            self.X = np.array(list(map(lambda x: os.path.join(self.path, cfg_test.img_dir, x), self.X)))
+
 
     def __len__(self):
         len_dataset = len(self.X)
@@ -31,8 +47,11 @@ class CustomDataset(Dataset):
         img = Image.open(self.X[idx])
         if self.transform:
             img = self.transform(img)
-        y = self.y[idx]
-        return img,y
+        if self.train == True:
+            y = self.y[idx]
+            return img, y
+        else:
+            return img
 
     def _getlabel(self, img_dir, data):
         self.direc=[]
@@ -55,6 +74,6 @@ class CustomDataset(Dataset):
                 temp_class+=2
             y.append(temp_class)
         return pd.concat([mask_pd['path'], pd.Series(data=y,name = 'ans')],axis=1).rename(columns={'path':'ImageID'})
-
+    
 if __name__ == "__main__":
-    mask_data = CustomDataset(cfg.data_dir,["id",'race'],train=True)
+    mask_train = CustomDataset(cfg_train.data_dir,'train.csv', train = True, transform = torchvision.transforms.ToTensor())
