@@ -95,8 +95,8 @@ batch_size = 16
 num_workers = 4
 num_classes = 3
 
-num_epochs = 5  # 학습할 epoch의 수
-lr = 1e-3
+num_epochs = 1  # 학습할 epoch의 수
+lr = 1e-4
 lr_decay_step = 10
 criterion_name = 'cross_entropy' # loss의 이름
 
@@ -154,7 +154,7 @@ def getDataloader(dataset, train_idx, valid_idx, batch_size, num_workers):
     os.makedirs(os.path.join(os.getcwd(), 'results', name), exist_ok=True)
 
 # 5-fold Stratified KFold 5개의 fold를 형성하고 5번 Cross Validation을 진행합니다.
-n_splits = 3
+n_splits = 5
 skf = StratifiedKFold(n_splits=n_splits)
 
 counter = 0
@@ -262,19 +262,11 @@ for i, (train_idx, valid_idx) in enumerate(skf.split(DATA.image, DATA.label)):
             val_loss = np.sum(val_loss_items) / len(val_loader)
             val_acc = np.sum(val_acc_items) / len(valid_idx)
 
-            # Callback1: validation accuracy가 향상될수록 모델을 저장합니다.
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
             if val_acc > best_val_acc:
-                #torch.save(model, f"/opt/ml/code/results/{name}/{epoch:03}_accuracy_{val_acc:4.2%}.pt")
                 best_val_acc = val_acc
-                #counter = 0
-            else:
-                #counter += 1
-            # Callback2: patience 횟수 동안 성능 향상이 없을 경우 학습을 종료시킵니다.
-            if counter > patience:
-                print("Early Stopping...")
-                break
+
 
 
             print(
