@@ -8,17 +8,24 @@ from torchvision.transforms import Resize, ToTensor, Normalize
 from PIL import Image
 import numpy as np
 
+
 class maskImageDataset(Dataset):
     def __init__(self,path,transform=None):
         self.image,self.label = self.labeling(path)
         self.transform = transform
         
     def __getitem__(self,idx):
-        image,label = np.asarray(Image.open(self.image[idx])),self.label[idx]
+        try: 
+            image,label = Image.open(self.image[idx]),self.label[idx]
+            if self.transform:
+                image = self.transform(image)
+            return image,label
+        except: # albumentaion을 쓸때는 위에처럼 하면 안되는 거 같아요
+            image,label = np.asarray(Image.open(self.image[idx])),self.label[idx]
 
-        if self.transform:
-            image = self.transform(image=image)
-        return image['image'],label
+            if self.transform:
+                image = self.transform(image=image)
+            return image['image'],label
 
     def __len__(self):
             return len(self.label)
