@@ -6,7 +6,7 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 from torchvision.transforms import Resize, ToTensor, Normalize
 from PIL import Image
-
+import numpy as np
 
 class maskImageDataset(Dataset):
     def __init__(self,path,transform=None):
@@ -14,10 +14,11 @@ class maskImageDataset(Dataset):
         self.transform = transform
         
     def __getitem__(self,idx):
-        image,label = Image.open(self.image[idx]),self.label[idx]
+        image,label = np.asarray(Image.open(self.image[idx])),self.label[idx]
+
         if self.transform:
-            image = self.transform(image)
-        return image,label
+            image = self.transform(image=image)
+        return image['image'],label
 
     def __len__(self):
             return len(self.label)

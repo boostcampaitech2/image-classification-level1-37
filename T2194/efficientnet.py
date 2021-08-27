@@ -5,18 +5,18 @@ import re
 from collections import OrderedDict
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
 import cv2
+import torch.nn as nn
 import numpy as np
 
 import torchvision
 from torchvision import transforms
 from torchvision.transforms import Resize, ToTensor, Normalize
 import math
-from timm.notebook import timm
+import timm
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
 
@@ -41,22 +41,20 @@ def seed_everything(seed):
 seed_everything(37) # random seed 37
 
 
-x = len(DATA)
-
 transformss = A.Compose([
         #A.CenterCrop(350,200,p=1.0),
-        A.MotionBlur(),
-        A.RGBShift(),
         A.Normalize(mean=(0.5, 0.5, 0.5), std=(0.2, 0.2, 0.2)),
         ToTensorV2(),
 ])
+device = torch.device('cuda')
+
 DATA = maskImageDataset(train_dir,transformss) #데이터셋
 x = len(DATA)
 
 batch_size = 16
 loaders = DataLoader(
     DATA,batch_size=batch_size,shuffle=True,num_workers=1)
-
+loss_function = loss_fn(DATA)
 
 efficientnet = timm.create_model('tf_efficientnet_b0', pretrained=True,num_classes=18)
 #for param in efficientnet.parameters():
@@ -70,5 +68,5 @@ efficientnet.classifier = nn.Linear(in_features=1280, out_features=18, bias=True
 if torch.cuda.is_available():
     efficientnet.cuda()
 
-loss,acc = training(efficientnet,x,loaders,device,loss_fn,10)
+loss,acc = training(efficientnet,x,loaders,device,loss_function,10)
 eval(efficientnet,'efficeint.csv')
