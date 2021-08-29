@@ -8,9 +8,12 @@ import numpy as np
 import torch
 from PIL import Image
 from torch.utils.data import Dataset, Subset, random_split
-from torchvision import transforms
-from torchvision.transforms import *
+# from torchvision import transforms
+# from torchvision.transforms import *
+import albumentations as A
+from albumentations.augmentations.crops.import transforms as AC
 
+from sklearn.model_selection import train_test_split
 IMG_EXTENSIONS = [
     ".jpg", ".JPG", ".jpeg", ".JPEG", ".png",
     ".PNG", ".ppm", ".PPM", ".bmp", ".BMP",
@@ -22,11 +25,17 @@ def is_image_file(filename):
 
 
 class BaseAugmentation:
-    def __init__(self, resize, mean, std, **args):
-        self.transform = transforms.Compose([
-            Resize(resize, Image.BILINEAR),
-            ToTensor(),
-            Normalize(mean=mean, std=std),
+    def __init__(self, resize, mean, std, **args): #albumentations 
+        self.transform = A.Compose([
+            A.Resize(resize),
+            #A.CenterCrop(350,200,p=1.0),
+            A.Normalize(mean=mean, std=std),
+            A.ToTensorV2(),
+        ])
+        # self.transform = transforms.Compose([
+        #     Resize(resize, Image.BILINEAR),
+        #     ToTensor(),
+        #     Normalize(mean=mean, std=std),
         ])
 
     def __call__(self, image):
@@ -51,15 +60,22 @@ class AddGaussianNoise(object):
 
 
 class CustomAugmentation:
-    def __init__(self, resize, mean, std, **args):
-        self.transform = transforms.Compose([
-            CenterCrop((320, 256)),
-            Resize(resize, Image.BILINEAR),
-            ColorJitter(0.1, 0.1, 0.1, 0.1),
-            ToTensor(),
-            Normalize(mean=mean, std=std),
-            AddGaussianNoise()
+    def __init__(self, resize, mean, std, **args): #albumentations 
+        self.transform = A.Compose([
+            AC.CenterCrop(350,200,p=1.0),
+            A.Resize(resize),
+            A.Normalize(mean=mean, std=std),
+            A.ToTensorV2(),
         ])
+
+        # self.transform = transforms.Compose([
+        #     CenterCrop((320, 256)),
+        #     Resize(resize, Image.BILINEAR),
+        #     ColorJitter(0.1, 0.1, 0.1, 0.1),
+        #     ToTensor(),
+        #     Normalize(mean=mean, std=std),
+        #     AddGaussianNoise()
+        # ])
 
     def __call__(self, image):
         return self.transform(image)
@@ -133,11 +149,12 @@ class MaskBaseDataset(Dataset):
         self.transform = None
         self.setup()
         self.calc_statistics()
+        self.get_labels_all_images()
 
     def setup(self):
         profiles = os.listdir(self.data_dir)
         for profile in profiles:
-            if profile.startswith("."):  # "." 로 시작하는 파일은 무시합니다
+            if profile.startswith("._") or "ipynb_checkpoints" in profile:  # "."로 시작하거나 "ipynb_checkpoints" 단어가 포함된 파일은 무시합니다
                 continue
 
             img_folder = os.path.join(self.data_dir, profile)
@@ -157,6 +174,12 @@ class MaskBaseDataset(Dataset):
                 self.mask_labels.append(mask_label)
                 self.gender_labels.append(gender_label)
                 self.age_labels.append(age_label)
+    
+    def get_labels_all_images(self):
+        self.all_labels = list(map(lambda tmp_mask, tmp_gen, tmp_age : 
+                                   self.encode_multi_class(tmp_mask, tmp_gen, tmp_age),
+                                   self.mask_labels,self.gender_labels,self.age_labels))
+
 
     def calc_statistics(self):
         has_statistics = self.mean is not None and self.std is not None
@@ -232,7 +255,10 @@ class MaskBaseDataset(Dataset):
         """
         n_val = int(len(self) * self.val_ratio)
         n_train = len(self) - n_val
-        train_set, val_set = random_split(self, [n_train, n_val])
+
+
+        train_set,val_set = train_test_split(np.arange(self.all_labels), test_size=n_val,shuffle=True,stratify=self.all_labels)
+        # train_set, val_set = random_split(self, [n_train, n_val])
         return train_set, val_set
 
 
@@ -297,11 +323,17 @@ class MaskSplitByProfileDataset(MaskBaseDataset):
 class TestDataset(Dataset):
     def __init__(self, img_paths, resize, mean=(0.548, 0.504, 0.479), std=(0.237, 0.247, 0.246)):
         self.img_paths = img_paths
-        self.transform = transforms.Compose([
-            Resize(resize, Image.BILINEAR),
-            ToTensor(),
-            Normalize(mean=mean, std=std),
+        self.transform = A.Compose([ #albumentations 
+            A.Resize(resize),
+            A.ToTensorV2(),
+            A.Normalize(mean=mean, std=std),
         ])
+
+        # self.transform = transforms.Compose([
+        #     Resize(resize, Image.BILINEAR),
+        #     ToTensor(),
+        #     Normalize(mean=mean, std=std),
+        # ])
 
     def __getitem__(self, index):
         image = Image.open(self.img_paths[index])

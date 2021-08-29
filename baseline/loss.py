@@ -4,19 +4,21 @@ import torch.nn.functional as F
 
 
 # https://discuss.pytorch.org/t/is-this-a-correct-implementation-for-focal-loss-in-pytorch/43327/8
-class FocalLoss(nn.Module):
+class FocalLossWithLabelSmoothing(nn.Module): #labelsmoothing 추가 -T2008
     def __init__(self, weight=None,
-                 gamma=2., reduction='mean'):
+                 gamma=2., ls=0.1,classes=18,reduction='mean'):
         nn.Module.__init__(self)
         self.weight = weight
         self.gamma = gamma
         self.reduction = reduction
+        self.ls = ls
+        self.classes=classes
 
     def forward(self, input_tensor, target_tensor):
         log_prob = F.log_softmax(input_tensor, dim=-1)
         prob = torch.exp(log_prob)
         return F.nll_loss(
-            ((1 - prob) ** self.gamma) * log_prob,
+            ((((1-self.ls)*prob)+self.ls/self.classes) ** self.gamma) * log_prob,
             target_tensor,
             weight=self.weight,
             reduction=self.reduction
@@ -64,10 +66,25 @@ class F1Loss(nn.Module):
         f1 = f1.clamp(min=self.epsilon, max=1 - self.epsilon)
         return 1 - f1.mean()
 
+class CrossEntropyLossWithLabelSmoothing(nn.Modules._WeightedLoss):
+    __constants__ = ['ignore_index', 'reduction']
+    ignore_index: int
+
+    def __init__(self, weight:Optional[Tensor] = None, size_average=None, ignore_index: int = -100,
+                 reduce=None, reduction: str = 'mean', classes=18, ls=0.1) -> None:
+        super().__init__(weight, size_average, reduce, reduction)
+        self.ignore_index = ignore_index
+        self.classes = classes
+        self.ls = ls
+
+    def forward(self, input: Tensor, target: Tensor) -> Tensor:
+        input = (1-self.ls)*input + self.ls/self.classes ## label smoothing
+        return F.cross_entropy(input, target, weight=self.weight,
+                               ignore_index=self.ignore_index, reduction=self.reduction)
 
 _criterion_entrypoints = {
-    'cross_entropy': nn.CrossEntropyLoss,
-    'focal': FocalLoss,
+    'cross_entropy': CrossEntropyLossWithLabelSmoothing,
+    'focal': FocalLossWithLabelSmoothing,
     'label_smoothing': LabelSmoothingLoss,
     'f1': F1Loss
 }

@@ -109,7 +109,7 @@ def train(data_dir, model_dir, args):
     dataset.set_transform(transform)
 
     # -- data_loader
-    train_set, val_set = dataset.split_dataset()
+    train_set, val_set = dataset.split_dataset() # train_test_split, stratify
 
     train_loader = DataLoader(
         train_set,
