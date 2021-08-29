@@ -29,7 +29,6 @@ def load_model(saved_model, num_classes, device):
 def inference(data_dir, model_dir, output_dir, args):
     """
     """
-    # import pdb;pdb.set_trace()
     use_cuda = torch.cuda.is_available()
     device = torch.device("cuda" if use_cuda else "cpu")
 
@@ -70,13 +69,13 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
     # Data and model checkpoints directories
-    parser.add_argument('--batch_size', type=int, default=64, help='input batch size for validing (default: 1000)')
+    parser.add_argument('--batch_size', type=int, default=16, help='input batch size for validing (default: 1000)')
     parser.add_argument('--resize', type=tuple, default=(244, 224), help='resize size for image when you trained (default: (96, 128))')
-    parser.add_argument('--model', type=str, default='MyModel', help='model type (default: BaseModel)')
+    parser.add_argument('--model', type=str, default='BaseModel', help='model type (default: BaseModel)')
 
     # Container environment
     parser.add_argument('--data_dir', type=str, default=os.environ.get('SM_CHANNEL_EVAL', '/opt/ml/input/data/eval'))
-    parser.add_argument('--model_dir', type=str, default=os.environ.get('SM_CHANNEL_MODEL', './model/exp8'))
+    parser.add_argument('--model_dir', type=str, default=os.environ.get('SM_CHANNEL_MODEL', './model'))
     parser.add_argument('--output_dir', type=str, default=os.environ.get('SM_OUTPUT_DATA_DIR', './output'))
 
     args = parser.parse_args()
