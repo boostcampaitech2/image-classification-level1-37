@@ -51,10 +51,10 @@ class maskImageDataset(Dataset):
                 image_path = dir_path + '/' + image 
                 x.append(image_path)
                 label = [0 for _ in range(18)]
-                y.append(self.age_labeling(image,code))
+                y.append(self.mask_labeling(image,code))
         return x,y
                 
-    def age_labeling(self,path,inputs):
+    def mask_labeling(self,path,inputs):
         if 'incorrect_mask' in path:
             return inputs + 6
         elif 'normal' in path:

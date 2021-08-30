@@ -17,5 +17,3 @@ class myefficientnet_b0(nn.Module):
                 stride=(1, 1), bias=False))    
     def forward(self,x):
         return self.pretrain_model(x)
-
-
