@@ -22,6 +22,7 @@ from loss import create_criterion
 from sklearn.metrics import f1_score
 
 import nni
+import logging
 from nni.utils import merge_parameter
 logger_p = logging.getLogger('mask_AutoML')
 
