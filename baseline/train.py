@@ -261,6 +261,168 @@ def train(data_dir, model_dir, args):
             logger.add_figure("results", figure, epoch)
             print()
 
+def cutmix_train(data_dir, model_dir, args):
+    seed_everything(args.seed)
+
+    save_dir = increment_path(os.path.join(model_dir, args.name))
+
+    # -- settings
+    use_cuda = torch.cuda.is_available()
+    device = torch.device("cuda" if use_cuda else "cpu")
+
+    # -- dataset
+    dataset_module = getattr(import_module("dataset"), args.dataset)  # default: BaseAugmentation
+    dataset = dataset_module(
+        data_dir=data_dir,
+    )
+    num_classes = dataset.num_classes  # 18
+
+    # -- augmentation
+    transform_module = getattr(import_module("dataset"), args.augmentation)  # default: BaseAugmentation
+    transform = transform_module(
+        resize=args.resize,
+        mean=dataset.mean,
+        std=dataset.std,
+    )
+    dataset.set_transform(transform)
+
+    # -- data_loader
+    train_set, val_set = dataset.split_dataset()
+
+    train_loader = DataLoader(
+        train_set,
+        batch_size=args.batch_size,
+        num_workers=multiprocessing.cpu_count()//2,
+        shuffle=True,
+        pin_memory=use_cuda,
+        drop_last=True,
+    )
+
+    val_loader = DataLoader(
+        val_set,
+        batch_size=args.valid_batch_size,
+        num_workers=multiprocessing.cpu_count()//2,
+        shuffle=False,
+        pin_memory=use_cuda,
+        drop_last=True,
+    )
+
+    # -- model
+    model_module = getattr(import_module("model"), args.model)  # default: BaseModel
+    model = model_module(
+        num_classes=num_classes
+    ).to(device)
+    model = torch.nn.DataParallel(model)
+
+    # -- loss & metric
+    criterion = create_criterion(args.criterion)  # default: cross_entropy
+    opt_module = getattr(import_module("torch.optim"), args.optimizer)  # default: SGD
+    optimizer = opt_module(
+        filter(lambda p: p.requires_grad, model.parameters()),
+        lr=args.lr,
+        weight_decay=5e-4
+    )
+    scheduler = StepLR(optimizer, args.lr_decay_step, gamma=0.5)
+
+    # -- logging
+    logger = SummaryWriter(log_dir=save_dir)
+    with open(os.path.join(save_dir, 'config.json'), 'w', encoding='utf-8') as f:
+        json.dump(vars(args), f, ensure_ascii=False, indent=4)
+
+    best_val_acc = 0
+    best_val_loss = np.inf
+    for epoch in range(args.epochs):
+        # train loop
+        model.train()
+        loss_value = 0
+        matches = 0
+        for idx, train_batch in enumerate(train_loader):
+            inputs, labels = train_batch
+            inputs = inputs.to(device)
+            labels = labels.to(device)
+
+            lam = np.random.beta(1.0,1.0)
+            rand_index = torch.randperm(inputs.size()[0]).cuda()
+            target_a = labels
+            target_b = labels[rand_index]
+
+            bbx1, bby1, bbx2, bby2 = rand_bbox(inputs.size(), lam)
+            inputs[:, :, bbx1:bbx2, bby1:bby2] = inputs[rand_index, :, bbx1:bbx2, bby1:bby2]
+            # adjust lambda to exactly match pixel ratio
+            lam = 1 - ((bbx2 - bbx1) * (bby2 - bby1) / (inputs.size()[-1] * inputs.size()[-2]))
+            # compute output
+
+            optimizer.zero_grad()
+
+            outs = model(inputs)
+            preds = torch.argmax(outs, dim=-1)
+            loss = criterion(outs, target_a) * lam + criterion(outs, target_b) * (1. - lam)
+
+            loss.backward()
+            optimizer.step()
+
+            loss_value += loss.item()
+            matches += (preds == labels).sum().item()
+            if (idx + 1) % args.log_interval == 0:
+                train_loss = loss_value / args.log_interval
+                train_acc = matches / args.batch_size / args.log_interval
+                current_lr = get_lr(optimizer)
+                print(
+                    f"Epoch[{epoch}/{args.epochs}]({idx + 1}/{len(train_loader)}) || "
+                    f"training loss {train_loss:4.4} || training accuracy {train_acc:4.2%} || lr {current_lr}"
+                )
+                logger.add_scalar("Train/loss", train_loss, epoch * len(train_loader) + idx)
+                logger.add_scalar("Train/accuracy", train_acc, epoch * len(train_loader) + idx)
+
+                loss_value = 0
+                matches = 0
+
+        scheduler.step()
+
+        # val loop
+        with torch.no_grad():
+            print("Calculating validation results...")
+            model.eval()
+            val_loss_items = []
+            val_acc_items = []
+            figure = None
+            for val_batch in val_loader:
+                inputs, labels = val_batch
+                inputs = inputs.to(device)
+                labels = labels.to(device)
+
+                outs = model(inputs)
+                preds = torch.argmax(outs, dim=-1)
+
+                loss_item = criterion(outs, labels).item()
+                acc_item = (labels == preds).sum().item()
+                val_loss_items.append(loss_item)
+                val_acc_items.append(acc_item)
+
+                if figure is None:
+                    inputs_np = torch.clone(inputs).detach().cpu().permute(0, 2, 3, 1).numpy()
+                    inputs_np = dataset_module.denormalize_image(inputs_np, dataset.mean, dataset.std)
+                    figure = grid_image(
+                        inputs_np, labels, preds, n=16, shuffle=args.dataset != "MaskSplitByProfileDataset"
+                    )
+
+            val_loss = np.sum(val_loss_items) / len(val_loader)
+            val_acc = np.sum(val_acc_items) / len(val_set)
+            best_val_loss = min(best_val_loss, val_loss)
+            if val_acc > best_val_acc:
+                print(f"New best model for val accuracy : {val_acc:4.2%}! saving the best model..")
+                torch.save(model.module.state_dict(), f"{save_dir}/best.pth")
+                best_val_acc = val_acc
+            torch.save(model.module.state_dict(), f"{save_dir}/last.pth")
+            print(
+                f"[Val] acc : {val_acc:4.2%}, loss: {val_loss:4.2} || "
+                f"best acc : {best_val_acc:4.2%}, best loss: {best_val_loss:4.2}"
+            )
+            logger.add_scalar("Val/loss", val_loss, epoch)
+            logger.add_scalar("Val/accuracy", val_acc, epoch)
+            logger.add_figure("results", figure, epoch)
+            print()
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
