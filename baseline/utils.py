@@ -2,10 +2,11 @@ import torch
 import numpy as np
 from collections import Counter
 from sklearn.preprocessing import LabelEncoder
-
+from train_nni_cutmix import seed_everything
 
 class rand_bbox:
-    def __init__(self,inputs, labels, beta1, beta2):
+    def __init__(self,inputs, labels, beta1, beta2,random_seed):
+        seed_everything(random_seed)
         self.labels = labels
         self.inputs = inputs
         self.size = inputs.size()
@@ -38,9 +39,11 @@ class rand_bbox:
         cy = np.random.randint(H)
 
         # 패치 모서리 좌표 값
-        self.x1 = 0
+        # self.x1 = 0
+        self.x1 = np.clip(cx - cut_w // 2, 0, H)
         self.y1 = np.clip(cy - cut_h // 2, 0, H)
-        self.x2 = W
+        # self.x2 = W
+        self.x2 = np.clip(cx + cut_w // 2, 0, H)
         self.y2 = np.clip(cy + cut_h // 2, 0, H)
 
     def get_cutmiximage_and_lam(self):
