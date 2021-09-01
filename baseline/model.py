@@ -54,12 +54,30 @@ class TimmModel(nn.Module):
         return x
 
 class sjmodel(nn.Module):
-    def __init__(self,num_classes=18):
+    def __init__(self,num_classes, model_type):
         super().__init__()
-        self.model_name = EfficientNet.from_pretrained('efficientnet-b4',
-                                                      in_channels=3,
-                                                       num_classes=num_classes)  # weight가져오고 num_classes(두번째 파라미터로 학습시키는 class 수)
-        self.model_name._dropout = torch.nn.Dropout(p=0.7, inplace=False)
+        self.model_type=model_type
+        self.model_name = EfficientNet.from_pretrained(f'efficientnet-{self.model_type}',
+                                                       in_channels=3,
+                                                       num_classes=num_classes)
+        if model_type=="b4":
+            self.model_name._dropout = nn.Dropout(p=0.7, inplace=False)
+            
     def forward(self, x):
         x = F.relu(self.model_name(x))
         return x
+
+class sumodel(nn.Module):
+    def __init__(self, num_classes, model_type):
+        super().__init__()
+        self.model_type = model_type
+        self.num_classes = num_classes
+        self.pretrain_model = timm.create_model(f'tf_efficientnet_{self.model_type}', pretrained=True, num_classes = num_classes)
+        self.last_num_feature = self.pretrain_model.classifier.in_features
+        self.pretrain_model.classifier = nn.Sequential(
+            nn.Dropout(0.25),
+            nn.Linear(self.last_num_feature, num_classes))
+        
+    def forward(self,x):
+        return self.pretrain_model(x)
+ 

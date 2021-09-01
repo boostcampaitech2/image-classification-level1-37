@@ -81,6 +81,22 @@ class CustomAugmentation_Max:
     def __call__(self, image):
         return self.transform(image=image)
 
+class CustomAugmentation_2243:
+    def __init__(self, height,width, mean, std, **args):
+        self.transform = A.Compose([
+            A.CenterCrop(300,250,p=1.0),
+            A.HorizontalFlip(p=0.5),
+            A.Rotate(limit=10,p=0.5),
+            A.Normalize(mean=mean, std=std),
+            ToTensorV2()
+        ])
+    def __call__(self, image):
+        return self.transform(image=image)
+
+train_transform = T.Compose([
+    
+])
+
 
 class MaskLabels(int, Enum):
     MASK = 0
@@ -321,47 +337,32 @@ class MaskSplitByProfileDataset(MaskBaseDataset):
 
 
 class TestDataset(Dataset):
-    def __init__(self, img_paths, height,width, mean=(0.548, 0.504, 0.479), std=(0.237, 0.247, 0.246)):
+    def __init__(self, img_paths, height, width, img_labels=None, 
+                 mean=(0.548, 0.504, 0.479), std=(0.237, 0.247, 0.246)):
         self.img_paths = img_paths
+        self.img_labels= img_labels
         self.transform = A.Compose([
             A.Resize(height=height,width=width),
             A.Normalize(mean=mean, std=std),
             ToTensorV2()
         ])
 
+        # self.transform = A.Compose([
+        #     A.CenterCrop(300,250,p=1.0),
+        #     A.Normalize(mean=mean, std=std),
+        #     ToTensorV2()
+        #     ])
+
     def __getitem__(self, index):
         image = cv2.imread(self.img_paths[index])
 
         if self.transform:
             image = self.transform(image=image)
-        return image['image']
+            if self.img_labels != None:
+                return image['image'], self.img_labels[index]
+            else:
+                return image['image']
+
 
     def __len__(self):
         return len(self.img_paths)
-
-    
-class SeudoDataset(Dataset):
-    def __init__(self,csv_path,img_path,transform=None):
-        self.image,self.label = self.labeling(csv_path,img_path)
-        self.transform = transform
-        
-    def __getitem__(self,idx):
-        image,label = Image.open(self.image[idx]),self.label[idx]
-        if self.transform:
-            image = self.transform(image)
-        return image,label
-
-    def __len__(self):
-            return len(self.label)
-
-    def labeling(self,csv_path,img_path):
-        x = []
-        y = []
-        seudo_csv=pd.read_csv(csv_path)
-        for i in range(len(seudo_csv)):
-            if ')' in seudo_csv['ans'][i]:
-                continue
-            x.append(os.path.join(img_path,seudo_csv['ImageID'][i]))
-            temp=int(seudo_csv['ans'][i])
-            y.append(torch.tensor(temp))
-        return x,y

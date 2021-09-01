@@ -7,14 +7,16 @@ import random
 import re
 from importlib import import_module
 from pathlib import Path
-from collections import Counter
+import pandas as pd
 
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+import torch.nn as nn
 from torch.optim.lr_scheduler import StepLR
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
+from tqdm import tqdm
 
 from dataset import MaskBaseDataset
 from loss import create_criterion
@@ -92,8 +94,10 @@ def increment_path(path, exist_ok=False):
 
 def train(args):
     seed_everything(args['seed'])
-
     save_dir = increment_path(os.path.join(args['model_dir'], args['name']))
+    print("*"*30)
+    print(f"{save_dir:*^30}")
+    print("*"*30)
 
     # -- settings
     use_cuda = torch.cuda.is_available()
@@ -115,24 +119,12 @@ def train(args):
         std=dataset.std,
     )
     dataset.set_transform(transform)
-
     # -- data_loader
-    train_set, val_set = dataset.split_dataset()
-
     train_loader = DataLoader(
-        train_set,
+        dataset,
         batch_size=args['batch_size'],
         num_workers=multiprocessing.cpu_count()//2,
         shuffle=True,
-        pin_memory=use_cuda,
-        drop_last=True,
-    )
-
-    val_loader = DataLoader(
-        val_set,
-        batch_size=args['valid_batch_size'],
-        num_workers=multiprocessing.cpu_count()//2,
-        shuffle=False,
         pin_memory=use_cuda,
         drop_last=True,
     )
@@ -147,7 +139,7 @@ def train(args):
     
     # -- loss & metric
     #loss weight
-    train_data_labels = train_set.dataset.output_labels
+    train_data_labels = dataset.output_labels
     weights_module = getattr(import_module("utils"), "GetClassWeights")
     weights = weights_module(train_data_labels)
     class_weights = weights.get_weights(args['weights_type'])
@@ -167,15 +159,36 @@ def train(args):
     with open(os.path.join(save_dir, 'config.json'), 'w', encoding='utf-8') as f:
         json.dump(args, f, ensure_ascii=False, indent=4)
 
+    # -- pesudo labeling config
+    img_root = os.path.join(args['data_dir_sudo'], 'images')
+    info_path = os.path.join(args['data_dir_sudo'], 'info.csv')
+    csvfile_path = os.path.join(args['output_dir'], 'sudo_output.csv')
+    info = pd.read_csv(info_path)
+    img_paths = [os.path.join(img_root, img_id) for img_id in info.ImageID]
+    TestDataset = getattr(import_module("dataset"), 'TestDataset')
+    dataset = TestDataset(img_paths=img_paths,
+                          height=args['resize_height'],
+                          width=args['resize_width'])
+    
+    SoftMax=nn.Softmax(dim=1)
+    sudo_loader = torch.utils.data.DataLoader(
+        dataset,
+        batch_size=args['batch_size'],
+        num_workers=multiprocessing.cpu_count()//2,
+        shuffle=False,
+        pin_memory=use_cuda,
+        drop_last=False,
+    )
+
     best_val_f1 = 0
     best_val_acc = 0
     best_val_loss = np.inf
     for epoch in range(args['epochs']):
         # train loop
         model.train()
-        f1_value = 0
-        loss_value = 0
-        matches = 0
+        f1_value_item = []
+        loss_value_item = []
+        matches_item = []
         for idx, train_batch in enumerate(train_loader):
             inputs, labels = train_batch
             inputs = inputs.to(device)
@@ -186,7 +199,8 @@ def train(args):
                 rand_bbox = rand_bbox_module(inputs=inputs,
                                             labels=labels,
                                             beta1=args['beta1'],
-                                            beta2=args['beta2'])
+                                            beta2=args['beta2'],
+                                            random_seed=args['seed'])
                 inputs, lam, target_a, target_b = rand_bbox.get_cutmiximage_and_lam()
 
             optimizer.zero_grad()
@@ -200,13 +214,13 @@ def train(args):
 
             loss.backward()
             optimizer.step()
-            f1_value += get_f1_score(labels,preds).item()
-            loss_value += loss.item()
-            matches += (preds == labels).sum().item()
+            f1_value_item.append(get_f1_score(labels,preds).item())
+            loss_value_item.append(loss.item())
+            matches_item.append((preds == labels).sum().item())
             if (idx + 1) % args['log_interval'] == 0:
-                train_f1 = f1_value / args['log_interval']
-                train_loss = loss_value / args['log_interval']
-                train_acc = matches / args['batch_size'] / args['log_interval']
+                train_f1 = np.sum(f1_value_item) / (idx + 1)
+                train_loss = np.sum(loss_value_item) / (idx + 1)
+                train_acc = np.sum(matches_item) / args['batch_size'] / (idx + 1)
                 current_lr = get_lr(optimizer)
                 print(
                     f"Epoch[{epoch+1}/{args['epochs']}]({idx + 1}/{len(train_loader)}) || "
@@ -215,116 +229,176 @@ def train(args):
                 logger.add_scalar("Train/f1", train_f1, epoch * len(train_loader) + idx)
                 logger.add_scalar("Train/loss", train_loss, epoch * len(train_loader) + idx)
                 logger.add_scalar("Train/accuracy", train_acc, epoch * len(train_loader) + idx)
+                scheduler.step()
+        
+        f1 = np.sum(f1_value_item) / len(train_loader)
+        loss = np.sum(loss_value_item) / len(train_loader)
+        acc = np.sum(matches_item) / len(train_loader)
 
-                loss_value = 0
-                matches = 0
-                f1_value = 0
-
-        scheduler.step()
-
-        # val loop
-        with torch.no_grad():
-            print("Calculating validation results...")
-            model.eval()
-            val_loss_items = []
-            val_acc_items = []
-            val_f1_items = []
-            figure = None
-            for idx, val_batch in enumerate(val_loader):
-                inputs, labels = val_batch
-                inputs = inputs.to(device)
-                labels = labels.to(device)
-
-                outs = model(inputs)
-                preds = torch.argmax(outs, dim=-1)
-
-                loss_item = criterion(outs, labels).item()
-                acc_item = (labels == preds).sum().item()
-                f1_item = get_f1_score(labels,preds).item()
-
-                val_f1_items.append(f1_item)
-                val_loss_items.append(loss_item)
-                val_acc_items.append(acc_item)
-
-                if (idx + 1) % 4 == 0:
-                    val_f1_tmp = np.sum(val_f1_items) / (idx+1)
-                    val_loss_tmp = np.sum(val_loss_items) / (idx+1)
-                    val_acc_tmp = np.sum(val_acc_items) / args['valid_batch_size'] / (idx+1)
-                    current_lr = get_lr(optimizer)
-                    print(
-                        f"Epoch[{epoch+1}/{args['epochs']}]({idx + 1}/{len(val_loader)}) || "
-                        f"training f1 {val_f1_tmp:4.4} ||training loss {val_loss_tmp:4.4} || training accuracy {val_acc_tmp:4.2%} || lr {current_lr}"
-                    )
-                    
-                if figure is None:
-                    inputs_np = torch.clone(inputs).detach().cpu().permute(0, 2, 3, 1).numpy()
-                    inputs_np = dataset_module.denormalize_image(inputs_np, dataset.mean, dataset.std)
-                    figure = grid_image(
-                        inputs_np, labels, preds, n=16, shuffle=args['dataset'] != "MaskSplitByProfileDataset"
-                    )
+        if f1 > best_val_f1:
+            print(f"New best model for val f1 score : {f1:4.2%}! saving the best model..")
+            torch.save(model.module.state_dict(), f"{save_dir}/best.pth")
+            best_val_f1 = f1
+            best_val_acc = acc
+            best_val_loss = loss
+        torch.save(model.module.state_dict(), f"{save_dir}/last.pth")
             
-            val_f1 = np.sum(val_f1_items) / len(val_loader)
-            val_loss = np.sum(val_loss_items) / len(val_loader)
-            val_acc = np.sum(val_acc_items) / len(val_set)
+        
 
-            if val_f1 > best_val_f1:
-                print(f"New best model for val f1 score : {val_f1:4.2%}! saving the best model..")
-                torch.save(model.module.state_dict(), f"{save_dir}/best.pth")
-                best_val_f1 = val_f1
-                best_val_acc = val_acc
-                best_val_loss = val_loss
-
-            torch.save(model.module.state_dict(), f"{save_dir}/last.pth")
-            
-            print(
-                f"[Val] f1 : {val_f1:4.2%}, acc : {val_acc:4.2%}, loss: {val_loss:4.2} || "
+        print(
+                f"[Val] f1 : {f1:4.2%}, acc : {acc:4.2%}, loss: {loss:4.2} || "
                 f"best f1 : {best_val_f1:4.2%}, best acc : {best_val_acc:4.2%}, best loss: {best_val_loss:4.2}"
-            )
-            logger.add_scalar("Val/f1", val_f1, epoch)
-            logger.add_scalar("Val/loss", val_loss, epoch)
-            logger.add_scalar("Val/accuracy", val_acc, epoch)
-            logger.add_figure("results", figure, epoch)
-            # print()
-            
-            nni.report_intermediate_result(best_val_f1)
-            logger_p.debug('test accuracy(val) is %g', val_f1)
-            logger_p.debug('test accuracy(best) is %g', best_val_f1)
+        )
+        logger.add_scalar("Val/f1", f1, epoch)
+        logger.add_scalar("Val/loss", loss, epoch)
+        logger.add_scalar("Val/accuracy", acc, epoch)
+        
+        nni.report_intermediate_result(best_val_f1)
+        logger_p.debug('test accuracy(val) is %g', f1)
+        logger_p.debug('test accuracy(best) is %g', best_val_f1)
     
     nni.report_final_result(best_val_f1)
     logger_p.debug('Final result(f1 score) is %g', best_val_f1)
     logger_p.debug('Send final result done.')
+    
+    for i in range(args['sudo_train']):
+        model.eval()
+        print("Calculating pesudo labeling results..")
+        preds = []
+        with torch.no_grad():
+            if i+1 < args['sudo_train']:
+                for idx, images in enumerate(tqdm(sudo_loader)):
+                    images = images.to(device)
+                    pred = model(images)
+                    prob=SoftMax(pred)
+                    prob_bool=torch.argmax(prob,dim=-1)>=args['threshold']
+                    prob_argmax=torch.argmax(prob,dim=-1)
+                    for j in range(len(prob_bool)):
+
+                        if prob_bool[j]:
+                            preds.append(prob_argmax[j].cpu().numpy())
+                        else:
+                            preds.append(100)
+            else:
+                for idx, images in enumerate(tqdm(sudo_loader)):
+                    images = images.to(device)
+                    pred = model(images)
+                    pred = pred.argmax(dim=-1)
+                    preds.extend(pred.cpu().numpy())
+
+        info['ans'] = preds
+        info.to_csv(csvfile_path, index=False)
+
+        if i+1 < args['sudo_train']:
+            model.train()
+            info_train = pd.read_csv(csvfile_path)
+            info_train = info_train[info_train.ans!=100]
+            img_paths_train = [os.path.join(img_root, img_id) for img_id in info_train.ImageID]
+            img_labels_train = [int(label) for label in info_train.ans]
+            dataset_train = TestDataset(img_paths=img_paths_train,
+                                        img_labels=img_labels_train,
+                                        height=args['resize_height'],
+                                        width=args['resize_width'])
+
+            sudo_loader_train = torch.utils.data.DataLoader(dataset_train,
+                                                            num_workers=multiprocessing.cpu_count()//2,
+                                                            batch_size=args['batch_size'],
+                                                            shuffle=False,
+                                                            pin_memory=use_cuda,
+                                                            drop_last=False)
+            
+            for epoch in range(args['epochs']):
+                f1_value_item = []
+                loss_value_item = []
+                matches_item = []
+                for idx, train_batch in enumerate(sudo_loader_train):
+                    inputs, labels = train_batch
+                    inputs = inputs.to(device)
+                    labels = labels.to(device)
+                
+                if args['cutmix']==True:
+                    rand_bbox_module = getattr(import_module("utils"), 'rand_bbox')
+                    rand_bbox = rand_bbox_module(inputs=inputs,
+                                                labels=labels,
+                                                beta1=args['beta1'],
+                                                beta2=args['beta2'],
+                                                random_seed=args['seed'])
+                    inputs, lam, target_a, target_b = rand_bbox.get_cutmiximage_and_lam()
+
+                optimizer.zero_grad()
+                outs = model(inputs)
+                preds = torch.argmax(outs, dim=-1)
+                
+                if args['cutmix']==True:
+                    loss = criterion(outs, target_a) * lam + criterion(outs, target_b) * (1. - lam)
+                else:
+                    loss = criterion(outs, labels)
+
+                loss.backward()
+                optimizer.step()
+                f1_value_item.append(get_f1_score(labels,preds).item())
+                loss_value_item.append(loss.item())
+                matches_item.append((preds == labels).sum().item())
+                if (idx + 1) % args['log_interval'] == 0:
+                    train_f1 = np.sum(f1_value_item) / (idx + 1)
+                    train_loss = np.sum(loss_value_item) / (idx + 1)
+                    train_acc = np.sum(matches_item) / args['batch_size'] / (idx + 1)
+                    current_lr = get_lr(optimizer)
+                    print(
+                        f"Epoch[{epoch+1}/{args['epochs']}]({idx + 1}/{len(train_loader)}) || "
+                        f"training f1 {train_f1:4.4} ||training loss {train_loss:4.4} || training accuracy {train_acc:4.2%} || lr {current_lr}"
+                    )
+                    logger.add_scalar("Train/f1", train_f1, epoch * len(train_loader) + idx)
+                    logger.add_scalar("Train/loss", train_loss, epoch * len(train_loader) + idx)
+                    logger.add_scalar("Train/accuracy", train_acc, epoch * len(train_loader) + idx)
+                    scheduler.step()
+            
+            f1 = np.sum(f1_value_item) / len(train_loader)
+            loss = np.sum(loss_value_item) / len(train_loader)
+            acc = np.sum(matches_item) / len(train_loader)
+
+            if f1 > best_val_f1:
+                print(f"New best model for val f1 score : {f1:4.2%}! saving the best model..")
+                torch.save(model.module.state_dict(), f"{save_dir}/best.pth")
+                best_val_f1 = f1
+                best_val_acc = acc
+                best_val_loss = loss
+            torch.save(model.module.state_dict(), f"{save_dir}/last.pth")   
+            
 
 
 def get_params():
     #argparse를 사용하기 위해 argumentparser 객체 생성
     parser = argparse.ArgumentParser(description='Mask')
 
-    parser.add_argument('--seed', type=int, default=42, help='random seed (default: 42)')
+    parser.add_argument('--seed', type=int, default=37, help='random seed (default: 42)')
     parser.add_argument('--epochs', type=int, default=5, help='number of epochs to train (default: 1)')
     parser.add_argument('--dataset', type=str, default='MaskSplitByProfileDataset', help='dataset augmentation type (default: MaskBaseDataset)') #
-    parser.add_argument('--augmentation', type=str, default='CustomAugmentation1', help='data augmentation type (default: BaseAugmentation)') #CustomAugmentation
-    parser.add_argument("--resize", nargs="+", type=list, default=(512, 384), help='resize size for image when training')
-    parser.add_argument('--resize_height', type=int, default=380, help='input batch size for training (default: 64)')# b0 224 ,b1 240 ,b2 260 ,b3 300 
-    parser.add_argument('--resize_width', type=int, default=380, help='input batch size for training (default: 64)') # b4 380 ,b5 456 ,b6 528 ,b7 600 
-    parser.add_argument('--batch_size', type=int, default=32, help='input batch size for training (default: 64)')
+    parser.add_argument('--augmentation', type=str, default='CustomAugmentation_Max', help='data augmentation type (default: BaseAugmentation)') #CustomAugmentation
+    parser.add_argument('--resize_height', type=int, default=512, help='input batch size for training (default: 64)')# b0 224 ,b1 240 ,b2 260 ,b3 300 
+    parser.add_argument('--resize_width', type=int, default=384, help='input batch size for training (default: 64)') # b4 380 ,b5 456 ,b6 528 ,b7 600 
+    parser.add_argument('--batch_size', type=int, default=16, help='input batch size for training (default: 64)')
     parser.add_argument('--valid_batch_size', type=int, default=64, help='input batch size for validing (default: 1000)')
     parser.add_argument('--model', type=str, default='EffnetModel', help='model (EffnetModel, TimmModel)')
-    parser.add_argument('--model_type', type=str, default='b3', help='model type (range: b4_timm,b0~b7)')
+    parser.add_argument('--model_type', type=str, default='b4', help='model type (range: b4_timm,b0~b7)')
     parser.add_argument('--optimizer', type=str, default='Adam', help='optimizer type (default: Adam)')
     parser.add_argument('--lr', type=float, default=1e-4, help='learning rate (default: 1e-3)')
-    parser.add_argument('--val_ratio', type=float, default=0.2, help='ratio for validaton (default: 0.2)')
     parser.add_argument('--criterion', type=str, default='cross_entropy', help='criterion type (default: cross_entropy)')
     parser.add_argument('--lr_decay_step', type=int, default=100, help='learning rate scheduler decay step (default: 20)')
     parser.add_argument('--log_interval', type=int, default=50, help='how many batches to wait before logging training status')
     parser.add_argument('--name', default='exp', help='model save at {SM_MODEL_DIR}/{name}')
-    parser.add_argument('--weights_type', type=str, default='weights_vanilla', help='weights_vanilla(1-x/sum(x)), class_weights_sklearn(len(x)/(classes*freq)) (default: weights_vanilla)')
+    parser.add_argument('--weights_type', type=str, default='class_weights_sklearn', help='weights_vanilla(1-x/sum(x)), class_weights_sklearn(len(x)/(classes*freq)) (default: weights_vanilla)')
     parser.add_argument('--beta1', type=int, default=1, help='cutmix beta (default : 1)')
     parser.add_argument('--beta2', type=int, default=1, help='cutmix beta (default : 1)')
     parser.add_argument('--cutmix', type=bool, default=True, help='adjust cut mix(dafault=True')
+    parser.add_argument('--threshold', type=float, default=0.7, help='threshold')
+    parser.add_argument('--sudo_train', type=int, default=3, help='train_with_sudo_labels')
+    
     # Container environment
     parser.add_argument('--data_dir', type=str, default=os.environ.get('SM_CHANNEL_TRAIN', '/opt/ml/input/data/train/images'))
     parser.add_argument('--model_dir', type=str, default=os.environ.get('SM_MODEL_DIR', './model'))
-  
+    parser.add_argument('--data_dir_sudo', type=str, default=os.environ.get('SM_CHANNEL_TRAIN', '/opt/ml/input/data/eval'))
+    parser.add_argument('--output_dir', type=str, default=os.environ.get('SM_OUTPUT_DATA_DIR', './output'))
     args, _ = parser.parse_known_args()
     #parse_args()와 매우 유사하지만, 여분의 인자가 있을 때 error를 발생시키지 않고, 채워진 이름 공간에 여분의 인자의 문자열 리스트를 포함하는 두 항목을 튜플로 반환
     return args

@@ -39,11 +39,11 @@ class rand_bbox:
         cy = np.random.randint(H)
 
         # 패치 모서리 좌표 값
-        # self.x1 = 0
-        self.x1 = np.clip(cx - cut_w // 2, 0, H)
+        self.x1 = 0
+        # self.x1 = np.clip(cx - cut_w // 2, 0, H)
         self.y1 = np.clip(cy - cut_h // 2, 0, H)
-        # self.x2 = W
-        self.x2 = np.clip(cx + cut_w // 2, 0, H)
+        self.x2 = W
+        # self.x2 = np.clip(cx + cut_w // 2, 0, H)
         self.y2 = np.clip(cy + cut_h // 2, 0, H)
 
     def get_cutmiximage_and_lam(self):

@@ -65,54 +65,6 @@ def inference(data_dir, model_dir, output_dir, args):
     info.to_csv(os.path.join(output_dir, f'output.csv'), index=False)
     print(f'Inference Done!')
     
-    
-    @torch.no_grad()
-def Sudo_inference(data_dir, model_dir, output_dir, args):
-    """
-    """
-    # import pdb;pdb.set_trace()
-    use_cuda = torch.cuda.is_available()
-    device = torch.device("cuda" if use_cuda else "cpu")
-
-    num_classes = MaskBaseDataset.num_classes  # 18
-    model = load_model(model_dir, num_classes, device).to(device)
-    model.eval()
-
-    img_root = os.path.join(data_dir, 'images')
-    info_path = os.path.join(data_dir, 'info.csv')
-    info = pd.read_csv(info_path)
-
-    img_paths = [os.path.join(img_root, img_id) for img_id in info.ImageID]
-    dataset = TestDataset(img_paths, args.resize)
-    loader = torch.utils.data.DataLoader(
-        dataset,
-        batch_size=args.batch_size,
-        num_workers=8,
-        shuffle=False,
-        pin_memory=use_cuda,
-        drop_last=False,
-    )
-
-    print("Calculating inference results..")
-    SoftMax=nn.Softmax()
-    threshold=0.7
-    preds = []
-    with torch.no_grad():
-        for idx, images in enumerate(loader):
-            images = images.to(device)
-            pred = model(images)
-            prob=SoftMax(pred)
-            if torch.max(prob)>=threshold:
-                pred = pred.argmax(dim=-1)
-                preds.extend(pred.cpu().numpy())
-                continue
-            preds.extend(torch.tensor([100]))
-
-    info['ans'] = preds
-    info.to_csv(os.path.join(output_dir, f'sudo_output.csv'), index=False)
-    print(f'Inference Done!')
-
-
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
