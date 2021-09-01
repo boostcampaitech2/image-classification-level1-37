@@ -59,10 +59,11 @@ class LabelSmoothingLoss(nn.Module):
 
 # https://gist.github.com/SuperShinyEyes/dcc68a08ff8b615442e3bc6a9b55a354
 class F1Loss(nn.Module):
-    def __init__(self, classes=3, epsilon=1e-7):
+    def __init__(self, classes=18, epsilon=1e-7, weights=None):
         super().__init__()
         self.classes = classes
         self.epsilon = epsilon
+        self.weight = weights
     def forward(self, y_pred, y_true):
         assert y_pred.ndim == 2
         assert y_true.ndim == 1
@@ -79,7 +80,11 @@ class F1Loss(nn.Module):
 
         f1 = 2 * (precision * recall) / (precision + recall + self.epsilon)
         f1 = f1.clamp(min=self.epsilon, max=1 - self.epsilon)
-        return 1 - f1.mean()
+        if self.weight==None:
+            return 1 - f1.mean()
+        else:
+            f1_loss_per_class = (1-f1)*self.weights
+            return f1_loss_per_class.mean()
 
 _criterion_entrypoints = {
     'cross_entropy': nn.CrossEntropyLoss,

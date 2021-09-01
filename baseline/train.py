@@ -15,7 +15,6 @@ import torch
 from torch.optim.lr_scheduler import StepLR
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
-from utils import rand_bbox
 
 from dataset import MaskBaseDataset
 from loss import create_criterion
@@ -91,210 +90,7 @@ def increment_path(path, exist_ok=False):
         n = max(i) + 1 if i else 2
         return f"{path}{n}"
 
-
 def train(args):
-    
-    seed_everything(args['seed'])
-    save_dir = increment_path(os.path.join(args['model_dir'], args['name']))
-
-    print("*"*30)
-    print(f"{save_dir:*^30}")
-    print("*"*30)
-
-    # -- settings
-    use_cuda = torch.cuda.is_available()
-    device = torch.device("cuda" if use_cuda else "cpu")
-
-    # -- dataset
-    dataset_module = getattr(import_module("dataset"), args['dataset'])  # default: BaseAugmentation / MaskSplitByProfileDataset
-    dataset = dataset_module(
-        data_dir=args['data_dir'],
-    )
-    num_classes = dataset.num_classes  # 18
-    
-    # -- augmentation
-    transform_module = getattr(import_module("dataset"), args['augmentation'])  # default: BaseAugmentation / CustomAugmentation
-    transform = transform_module(
-        height=args['resize_height'],
-        width=args['resize_width'],
-        mean=dataset.mean,
-        std=dataset.std,
-    )
-    dataset.set_transform(transform)
-
-    # -- data_loader
-    train_set, val_set = dataset.split_dataset()
-    train_loader = DataLoader(
-        train_set,
-        batch_size=args['batch_size'],
-        num_workers=multiprocessing.cpu_count()//2,
-        shuffle=True,
-        pin_memory=use_cuda,
-        drop_last=True,
-    )
-
-    val_loader = DataLoader(
-        val_set,
-        batch_size=args['valid_batch_size'],
-        num_workers=multiprocessing.cpu_count()//2,
-        shuffle=False,
-        pin_memory=use_cuda,
-        drop_last=True,
-    )
-
-    # -- model
-    model_module = getattr(import_module("model"), args['model'])  # default: BaseModel
-    model = model_module(
-        num_classes=num_classes,
-        model_type=args['model_type'],
-    ).to(device)
-    model = torch.nn.DataParallel(model)
-
-    # -- loss & metric
-    #loss weight
-    train_data_labels = train_set.dataset.output_labels
-    # class_weights = [v for l, v in sorted(Counter(train_data_labels).items())]
-    # class_weights = list(map(lambda x : 1-x/sum(class_weights),class_weights))
-    # class_weights = torch.FloatTensor(class_weights).to(device)
-
-    weights_module = getattr(import_module("utils"), "GetClassWeights")
-    weights = weights_module(train_data_labels)
-    class_weights = weights.get_weights(args['weights_type'])
-    class_weights = torch.FloatTensor(class_weights).to(device)
-
-    criterion = create_criterion(args['criterion'], weight=class_weights)  # default: cross_entropy
-    opt_module = getattr(import_module("torch.optim"), args['optimizer'])  # default: SGD
-    optimizer = opt_module(
-        filter(lambda p: p.requires_grad, model.parameters()),
-        lr=args['lr'],
-        weight_decay=5e-4
-    )
-    scheduler = StepLR(optimizer, args['lr_decay_step'], gamma=0.1)
-
-    # -- logging
-    logger = SummaryWriter(log_dir=save_dir)
-    with open(os.path.join(save_dir, 'config.json'), 'w', encoding='utf-8') as f:
-        json.dump(args, f, ensure_ascii=False, indent=4)
-
-    best_val_f1 = 0
-    best_val_acc = 0
-    best_val_loss = np.inf
-    for epoch in range(args['epochs']):
-        # train loop
-        model.train()
-        f1_value = 0
-        loss_value = 0
-        matches = 0
-        for idx, train_batch in enumerate(train_loader):
-            inputs, labels = train_batch
-            inputs = inputs.to(device)
-            labels = labels.to(device)
-
-            optimizer.zero_grad()
-
-            outs = model(inputs)
-            preds = torch.argmax(outs, dim=-1)
-            loss = criterion(outs, labels)
-            f1 = get_f1_score(labels,preds)
-
-            loss.backward()
-            optimizer.step()
-
-            f1_value += f1.item()
-            loss_value += loss.item()
-            matches += (preds == labels).sum().item()
-            if (idx + 1) % args['log_interval'] == 0:
-                train_f1 = f1_value / args['log_interval']
-                train_loss = loss_value / args['log_interval']
-                train_acc = matches / args['batch_size'] / args['log_interval']
-                current_lr = get_lr(optimizer)
-                print(
-                    f"Epoch[{epoch+1}/{args['epochs']}]({idx + 1}/{len(train_loader)}) || "
-                    f"training f1 {train_f1:4.4} ||training loss {train_loss:4.4} || training accuracy {train_acc:4.2%} || lr {current_lr}"
-                )
-                logger.add_scalar("Train/f1", train_f1, epoch * len(train_loader) + idx)
-                logger.add_scalar("Train/loss", train_loss, epoch * len(train_loader) + idx)
-                logger.add_scalar("Train/accuracy", train_acc, epoch * len(train_loader) + idx)
-
-                loss_value = 0
-                matches = 0
-                f1_value = 0
-
-        scheduler.step()
-
-        # val loop
-        with torch.no_grad():
-            print("Calculating validation results...")
-            model.eval()
-            val_loss_items = []
-            val_acc_items = []
-            val_f1_items = []
-            figure = None
-            for idx, val_batch in enumerate(val_loader):
-                inputs, labels = val_batch
-                inputs = inputs.to(device)
-                labels = labels.to(device)
-
-                outs = model(inputs)
-                preds = torch.argmax(outs, dim=-1)
-
-                loss_item = criterion(outs, labels).item()
-                acc_item = (labels == preds).sum().item()
-                f1_item = get_f1_score(labels,preds).item()
-
-                val_f1_items.append(f1_item)
-                val_loss_items.append(loss_item)
-                val_acc_items.append(acc_item)
-
-                if (idx + 1) % 4 == 0:
-                    val_f1_tmp = np.sum(val_f1_items) / (idx+1)
-                    val_loss_tmp = np.sum(val_loss_items) / (idx+1)
-                    val_acc_tmp = np.sum(val_acc_items) / args['valid_batch_size'] / (idx+1)
-                    current_lr = get_lr(optimizer)
-                    print(
-                        f"Epoch[{epoch+1}/{args['epochs']}]({idx + 1}/{len(val_loader)}) || "
-                        f"training f1 {val_f1_tmp:4.4} ||training loss {val_loss_tmp:4.4} || training accuracy {val_acc_tmp:4.2%} || lr {current_lr}"
-                    )
-                    
-                if figure is None:
-                    inputs_np = torch.clone(inputs).detach().cpu().permute(0, 2, 3, 1).numpy()
-                    inputs_np = dataset_module.denormalize_image(inputs_np, dataset.mean, dataset.std)
-                    figure = grid_image(
-                        inputs_np, labels, preds, n=16, shuffle=args['dataset'] != "MaskSplitByProfileDataset"
-                    )
-            
-            val_f1 = np.sum(val_f1_items) / len(val_loader)
-            val_loss = np.sum(val_loss_items) / len(val_loader)
-            val_acc = np.sum(val_acc_items) / len(val_set)
-
-            if val_f1 > best_val_f1:
-                print(f"New best model for val f1 score : {val_f1:4.2%}! saving the best model..")
-                torch.save(model.module.state_dict(), f"{save_dir}/best.pth")
-                best_val_f1 = val_f1
-                best_val_acc = val_acc
-                best_val_loss = val_loss
-
-            torch.save(model.module.state_dict(), f"{save_dir}/last.pth")
-            
-            print(
-                f"[Val] f1 : {val_f1:4.2%}, acc : {val_acc:4.2%}, loss: {val_loss:4.2} || "
-                f"best f1 : {best_val_f1:4.2%}, best acc : {best_val_acc:4.2%}, best loss: {best_val_loss:4.2}"
-            )
-            logger.add_scalar("Val/f1", val_f1, epoch)
-            logger.add_scalar("Val/loss", val_loss, epoch)
-            logger.add_scalar("Val/accuracy", val_acc, epoch)
-            logger.add_figure("results", figure, epoch)
-            # print()
-            
-            nni.report_intermediate_result(best_val_f1)
-            logger_p.debug('test accuracy(val) is %g', val_f1)
-            logger_p.debug('test accuracy(best) is %g', best_val_f1)
-    
-    nni.report_final_result(best_val_f1)
-    logger_p.debug('Final result(f1 score) is %g', best_val_f1)
-    logger_p.debug('Send final result done.')
-
-def cutmix_train(args):
     seed_everything(args['seed'])
 
     save_dir = increment_path(os.path.join(args['model_dir'], args['name']))
@@ -347,13 +143,10 @@ def cutmix_train(args):
         model_type=args['model_type'],
     ).to(device)
     model = torch.nn.DataParallel(model)
+    
     # -- loss & metric
     #loss weight
     train_data_labels = train_set.dataset.output_labels
-    # class_weights = [v for l, v in sorted(Counter(train_data_labels).items())]
-    # class_weights = list(map(lambda x : 1-x/sum(class_weights),class_weights))
-    # class_weights = torch.FloatTensor(class_weights).to(device)
-
     weights_module = getattr(import_module("utils"), "GetClassWeights")
     weights = weights_module(train_data_labels)
     class_weights = weights.get_weights(args['weights_type'])
@@ -386,29 +179,27 @@ def cutmix_train(args):
             inputs, labels = train_batch
             inputs = inputs.to(device)
             labels = labels.to(device)
-            lam = np.random.beta(args['beta_1'],args['beta_2'])
-            rand_index = torch.randperm(inputs.size()[0]).cuda()
-            target_a = labels
-            target_b = labels[rand_index]
-            rand_bbox_module = getattr(import_module("utils"), 'rand_bbox')
-            rand_bbox = rand_bbox_module(inputs.size(), lam)
-            bbx1, bby1, bbx2, bby2 = rand_bbox.coordinate()
-            # bbx1, bby1, bbx2, bby2 = rand_bbox(inputs.size(), lam)
-            inputs[:, :, bbx1:bbx2, bby1:bby2] = inputs[rand_index, :, bbx1:bbx2, bby1:bby2]
-            # adjust lambda to exactly match pixel ratio
-            lam = 1 - ((bbx2 - bbx1) * (bby2 - bby1) / (inputs.size()[-1] * inputs.size()[-2]))
-            # compute output
+            
+            if args['cutmix']==True:
+                rand_bbox_module = getattr(import_module("utils"), 'rand_bbox')
+                rand_bbox = rand_bbox_module(inputs=inputs,
+                                            labels=labels,
+                                            beta1=args['beta1'],
+                                            beta2=args['beta2'])
+                inputs, lam, target_a, target_b = rand_bbox.get_cutmiximage_and_lam()
 
             optimizer.zero_grad()
-
             outs = model(inputs)
             preds = torch.argmax(outs, dim=-1)
-            loss = criterion(outs, target_a) * lam + criterion(outs, target_b) * (1. - lam)
-            f1 = get_f1_score(labels,preds)
+            
+            if args['cutmix']==True:
+                loss = criterion(outs, target_a) * lam + criterion(outs, target_b) * (1. - lam)
+            else:
+                loss = criterion(outs, labels)
 
             loss.backward()
             optimizer.step()
-
+            f1_value += get_f1_score(labels,preds).item()
             loss_value += loss.item()
             matches += (preds == labels).sum().item()
             if (idx + 1) % args['log_interval'] == 0:
@@ -526,9 +317,9 @@ def get_params():
     parser.add_argument('--log_interval', type=int, default=50, help='how many batches to wait before logging training status')
     parser.add_argument('--name', default='exp', help='model save at {SM_MODEL_DIR}/{name}')
     parser.add_argument('--weights_type', type=str, default='weights_vanilla', help='weights_vanilla(1-x/sum(x)), class_weights_sklearn(len(x)/(classes*freq)) (default: weights_vanilla)')
-    parser.add_argument('--beta_1', type=int, default=1, help='cutmix beta (default : 1)')
-    parser.add_argument('--beta_2', type=int, default=1, help='cutmix beta (default : 1)')
-    
+    parser.add_argument('--beta1', type=int, default=1, help='cutmix beta (default : 1)')
+    parser.add_argument('--beta2', type=int, default=1, help='cutmix beta (default : 1)')
+    parser.add_argument('--cutmix', type=bool, default=True, help='adjust cut mix(dafault=True')
     # Container environment
     parser.add_argument('--data_dir', type=str, default=os.environ.get('SM_CHANNEL_TRAIN', '/opt/ml/input/data/train/images'))
     parser.add_argument('--model_dir', type=str, default=os.environ.get('SM_MODEL_DIR', './model'))
@@ -546,4 +337,3 @@ if __name__ == '__main__':
     params = vars(merge_parameter(get_params(),tuner_params))
     print(params)
     train(params)
-    # cutmix_train(params)

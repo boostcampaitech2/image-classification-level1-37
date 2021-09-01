@@ -1,13 +1,30 @@
 import torch
 import numpy as np
 from collections import Counter
-from sklearn.utils import class_weight
 from sklearn.preprocessing import LabelEncoder
 
+
 class rand_bbox:
-    def __init__(self, size,lam):
-        self.size = size
-        self.lam = lam
+    def __init__(self,inputs, labels, beta1, beta2):
+        self.labels = labels
+        self.inputs = inputs
+        self.size = inputs.size()
+        self.beta1 = beta1
+        self.beta2 = beta2
+        self.get_lam()
+        self.get_rand_index()
+        self.get_targets()
+        self.coordinate()
+
+    def get_lam(self):
+        self.lam = np.random.beta(self.beta1, self.beta2)
+    
+    def get_rand_index(self):
+        self.rand_index = torch.randperm(self.size[0])
+
+    def get_targets(self):
+        self.target_a = self.labels
+        self.target_b = self.labels[self.rand_index]
 
     def coordinate(self):
         W = self.size[2]
@@ -21,14 +38,17 @@ class rand_bbox:
         cy = np.random.randint(H)
 
         # 패치 모서리 좌표 값
-        bbx1 = 0
-        bby1 = np.clip(cy - cut_h // 2, 0, H)
-        bbx2 = W
-        bby2 = np.clip(cy + cut_h // 2, 0, H)
+        self.x1 = 0
+        self.y1 = np.clip(cy - cut_h // 2, 0, H)
+        self.x2 = W
+        self.y2 = np.clip(cy + cut_h // 2, 0, H)
 
-        return bbx1, bby1, bbx2, bby2
-
-
+    def get_cutmiximage_and_lam(self):
+        self.inputs[:, :, self.x1:self.x2, self.y1:self.y2] = \
+        self.inputs[self.rand_index, :, self.x1:self.x2, self.y1:self.y2]
+        self.lam = 1 - ((self.x2 - self.x1) * (self.y2 - self.y1) / (self.inputs.size()[-1] * self.inputs.size()[-2]))
+        return self.inputs, self.lam, self.target_a,self.target_b
+    
 class GetClassWeights:
     def __init__(self, labels):
         self.labels = labels
