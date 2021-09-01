@@ -66,6 +66,20 @@ class CustomAugmentation:
 
     def __call__(self, image):
         return self.transform(image=image)
+    
+    
+class CustomAugmentation_Max:
+    def __init__(self, height,width, mean, std, **args):
+        self.transform = A.Compose([
+            A.Normalize(mean=mean, std=std),
+            A.CenterCrop(300,250,p=1.0),
+            A.CoarseDropout(max_holes=50, max_height=8, max_width=8, min_holes=None, min_height=None, min_width=None, fill_value=0, mask_fill_value=None, always_apply=False, p=0.5),
+            A.Resize(height=height,width=width),
+            A.HorizontalFlip(p=0.5),
+            ToTensorV2()
+        ])
+    def __call__(self, image):
+        return self.transform(image=image)
 
 
 class MaskLabels(int, Enum):
