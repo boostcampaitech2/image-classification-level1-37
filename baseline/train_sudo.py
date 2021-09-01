@@ -146,7 +146,10 @@ def train(args):
     class_weights = torch.FloatTensor(class_weights).to(device)
 
     criterion = create_criterion(args['criterion'], weight=class_weights)  # default: cross_entropy
-    opt_module = getattr(import_module("torch.optim"), args['optimizer'])  # default: SGD
+    if args['optimizer'].lower()=="AdamP":
+        opt_module = getattr(import_module("adamp"), args['optimizer'])
+    else:
+        opt_module = getattr(import_module("torch.optim"), args['optimizer'])  # default: SGD
     optimizer = opt_module(
         filter(lambda p: p.requires_grad, model.parameters()),
         lr=args['lr'],
