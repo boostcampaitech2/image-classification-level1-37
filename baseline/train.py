@@ -154,8 +154,13 @@ def train(args):
     # -- loss & metric
     #loss weight
     train_data_labels = train_set.dataset.output_labels
-    class_weights = [v for l, v in sorted(Counter(train_data_labels).items())]
-    class_weights = list(map(lambda x : 1-x/sum(class_weights),class_weights))
+    # class_weights = [v for l, v in sorted(Counter(train_data_labels).items())]
+    # class_weights = list(map(lambda x : 1-x/sum(class_weights),class_weights))
+    # class_weights = torch.FloatTensor(class_weights).to(device)
+
+    weights_module = getattr(import_module("utils"), "GetClassWeights")
+    weights = weights_module(train_data_labels)
+    class_weights = weights.get_weights(args['weights_type'])
     class_weights = torch.FloatTensor(class_weights).to(device)
 
     criterion = create_criterion(args['criterion'], weight=class_weights)  # default: cross_entropy
@@ -344,12 +349,16 @@ def cutmix_train(args):
         model_package=args['model_package']
     ).to(device)
     model = torch.nn.DataParallel(model)
-
     # -- loss & metric
     #loss weight
     train_data_labels = train_set.dataset.output_labels
-    class_weights = [v for l, v in sorted(Counter(train_data_labels).items())]
-    class_weights = list(map(lambda x : 1-x/sum(class_weights),class_weights))
+    # class_weights = [v for l, v in sorted(Counter(train_data_labels).items())]
+    # class_weights = list(map(lambda x : 1-x/sum(class_weights),class_weights))
+    # class_weights = torch.FloatTensor(class_weights).to(device)
+
+    weights_module = getattr(import_module("utils"), "GetClassWeights")
+    weights = weights_module(train_data_labels)
+    class_weights = weights.get_weights(args['weights_type'])
     class_weights = torch.FloatTensor(class_weights).to(device)
 
     criterion = create_criterion(args['criterion'], weight=class_weights)  # default: cross_entropy
@@ -364,7 +373,7 @@ def cutmix_train(args):
     # -- logging
     logger = SummaryWriter(log_dir=save_dir)
     with open(os.path.join(save_dir, 'config.json'), 'w', encoding='utf-8') as f:
-        json.dump(vars(args), f, ensure_ascii=False, indent=4)
+        json.dump(args, f, ensure_ascii=False, indent=4)
 
     best_val_f1 = 0
     best_val_acc = 0
@@ -379,13 +388,13 @@ def cutmix_train(args):
             inputs, labels = train_batch
             inputs = inputs.to(device)
             labels = labels.to(device)
-
             lam = np.random.beta(args['beta_1'],args['beta_2'])
             rand_index = torch.randperm(inputs.size()[0]).cuda()
             target_a = labels
             target_b = labels[rand_index]
-            rand_bbox_module = getattr(import_module("utils"), args['bbox'])
-            bbx1, bby1, bbx2, bby2 = rand_bbox_module(inputs.size(), lam)
+            rand_bbox_module = getattr(import_module("utils"), 'rand_bbox')
+            rand_bbox = rand_bbox_module(inputs.size(), lam)
+            bbx1, bby1, bbx2, bby2 = rand_bbox.coordinate()
             # bbx1, bby1, bbx2, bby2 = rand_bbox(inputs.size(), lam)
             inputs[:, :, bbx1:bbx2, bby1:bby2] = inputs[rand_index, :, bbx1:bbx2, bby1:bby2]
             # adjust lambda to exactly match pixel ratio
@@ -519,6 +528,9 @@ def get_params():
     parser.add_argument('--lr_decay_step', type=int, default=100, help='learning rate scheduler decay step (default: 20)')
     parser.add_argument('--log_interval', type=int, default=50, help='how many batches to wait before logging training status')
     parser.add_argument('--name', default='exp', help='model save at {SM_MODEL_DIR}/{name}')
+    parser.add_argument('--weights_type', type=str, default='weights_vanilla', help='weights_vanilla(1-x/sum(x)), class_weights_sklearn(len(x)/(classes*freq)) (default: weights_vanilla)')
+    parser.add_argument('--beta_1', type=int, default=1, help='cutmix beta (default : 1)')
+    parser.add_argument('--beta_2', type=int, default=1, help='cutmix beta (default : 1)')
     
     # Container environment
     parser.add_argument('--data_dir', type=str, default=os.environ.get('SM_CHANNEL_TRAIN', '/opt/ml/input/data/train/images'))
@@ -537,3 +549,4 @@ if __name__ == '__main__':
     params = vars(merge_parameter(get_params(),tuner_params))
     print(params)
     train(params)
+    # cutmix_train(params)
