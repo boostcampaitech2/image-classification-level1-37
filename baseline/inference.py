@@ -42,7 +42,7 @@ def inference(data_dir, model_dir, output_dir, args):
     info = pd.read_csv(info_path)
 
     img_paths = [os.path.join(img_root, img_id) for img_id in info.ImageID]
-    dataset = TestDataset(img_paths, args.resize)
+    dataset = TestDataset(img_paths, height=args.height, width=args.width)
     loader = torch.utils.data.DataLoader(
         dataset,
         batch_size=args.batch_size,
@@ -71,7 +71,8 @@ if __name__ == '__main__':
 
     # Data and model checkpoints directories
     parser.add_argument('--batch_size', type=int, default=64, help='input batch size for validing (default: 1000)')
-    parser.add_argument('--resize', type=tuple, default=(244, 224), help='resize size for image when you trained (default: (96, 128))')
+    parser.add_argument('--height', type=int, default=244, help='resize height for image when you trained ')
+    parser.add_argument('--width', type=int, default=224, help='resize width for image when you trained')
     parser.add_argument('--model', type=str, default='EffnetModel', help='model (EffnetModel, TimmModel)')
     parser.add_argument('--model_type', type=str, default='b3', help='model type (range: b4_timm,b0~b7)')
 
