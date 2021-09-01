@@ -52,3 +52,14 @@ class TimmModel(nn.Module):
         x = self.pretrain_model(x)
         x = self.add_layers(x)
         return x
+
+class sjmodel(nn.Module):
+    def __init__(self,num_classes=18):
+        super().__init__()
+        self.model_name = EfficientNet.from_pretrained('efficientnet-b4',
+                                                      in_channels=3,
+                                                       num_classes=num_classes)  # weight가져오고 num_classes(두번째 파라미터로 학습시키는 class 수)
+        self.model_name._dropout = torch.nn.Dropout(p=0.7, inplace=False)
+    def forward(self, x):
+        x = F.relu(self.model_name(x))
+        return x
