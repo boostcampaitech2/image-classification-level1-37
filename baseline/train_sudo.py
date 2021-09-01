@@ -236,7 +236,7 @@ def train(args):
         
         f1 = np.sum(f1_value_item) / len(train_loader)
         loss = np.sum(loss_value_item) / len(train_loader)
-        acc = np.sum(matches_item) / len(train_loader)
+        acc = np.sum(matches_item) / len(dataset)
 
         if f1 > best_val_f1:
             print(f"New best model for val f1 score : {f1:4.2%}! saving the best model..")
