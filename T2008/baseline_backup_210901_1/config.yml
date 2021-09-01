@@ -5,7 +5,7 @@
 searchSpaceFile: search_space.json
 trialCommand: python3 train_nni.py  # NOTE: change "python3" to "python" if you are using Windows
 trialGpuNumber: 1
-trialConcurrency: 1
+trialConcurrency: 2
 tuner:
   name: TPE #TPE
   classArgs:

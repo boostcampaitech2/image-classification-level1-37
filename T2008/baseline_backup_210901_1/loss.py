@@ -41,7 +41,7 @@ class FocalLossWithLabelSmoothing(nn.Module): #labelsmoothing 추가 -T2008
 #             reduction=self.reduction
 #         )
 class LabelSmoothingLoss(nn.Module):
-    def __init__(self, classes=18, smoothing=1, dim=-1):
+    def __init__(self, classes=3, smoothing=0.0, dim=-1):
         super(LabelSmoothingLoss, self).__init__()
         self.confidence = 1.0 - smoothing
         self.smoothing = smoothing
@@ -59,7 +59,7 @@ class LabelSmoothingLoss(nn.Module):
 
 # https://gist.github.com/SuperShinyEyes/dcc68a08ff8b615442e3bc6a9b55a354
 class F1Loss(nn.Module):
-    def __init__(self, classes=18, epsilon=1e-7):
+    def __init__(self, classes=3, epsilon=1e-7):
         super().__init__()
         self.classes = classes
         self.epsilon = epsilon
@@ -100,10 +100,7 @@ def is_criterion(criterion_name):
 def create_criterion(criterion_name, **kwargs):
     if is_criterion(criterion_name):
         create_fn = criterion_entrypoint(criterion_name)
-        if criterion_name == "cross_entropy":
-            criterion = create_fn(**kwargs)
-        else:
-            criterion = create_fn
+        criterion = create_fn(**kwargs)
     else:
         raise RuntimeError('Unknown loss (%s)' % criterion_name)
     return criterion

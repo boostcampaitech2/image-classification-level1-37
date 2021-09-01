@@ -11,7 +11,7 @@ class MyModel(nn.Module):
         self.model_package = model_package
         self.num_classes = num_classes
         if self.model_package.lower()=="timm":
-            self.pretrain_model = timm.create_model(f'efficientnet_{self.model_type}', pretrained=True)
+            self.pretrain_model = timm.create_model('efficientnet_{self.model_type}', pretrained=True)
             self.pretrain_model = nn.Sequential(*list(self.pretrain_model.children()))[:-2]
             last_num_feature = self.pretrain_model[5].num_features #for eff b4
             
