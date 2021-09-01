@@ -147,7 +147,6 @@ def train(args):
     model = model_module(
         num_classes=num_classes,
         model_type=args['model_type'],
-        model_package=args['model_package']
     ).to(device)
     model = torch.nn.DataParallel(model)
 
@@ -346,7 +345,6 @@ def cutmix_train(args):
     model = model_module(
         num_classes=num_classes,
         model_type=args['model_type'],
-        model_package=args['model_package']
     ).to(device)
     model = torch.nn.DataParallel(model)
     # -- loss & metric
