@@ -71,13 +71,13 @@ class CustomAugmentation:
 class CustomAugmentation_Max:
     def __init__(self, height,width, mean, std, **args):
         self.transform = A.Compose([
-            A.Normalize(mean=mean, std=std),
-            A.CenterCrop(300,250,p=1.0),
-            A.CoarseDropout(max_holes=50, max_height=8, max_width=8, min_holes=None, min_height=None, min_width=None, fill_value=0, mask_fill_value=None, always_apply=False, p=0.5),
-            A.Resize(height=height,width=width),
-            A.HorizontalFlip(p=0.5),
-            ToTensorV2()
-        ])
+                A.Normalize(mean=mean, std=std),
+                A.CenterCrop(350,280,p=1.0),
+                A.CoarseDropout(max_holes=50, max_height=8, max_width=8, min_holes=None, min_height=None, min_width=None, fill_value=0, mask_fill_value=None, always_apply=False, p=0.5),
+                A.Resize(height=height,width=width),
+                A.HorizontalFlip(p=0.5),
+                ToTensorV2()
+            ])
     def __call__(self, image):
         return self.transform(image=image)
 
@@ -336,17 +336,21 @@ class TestDataset(Dataset):
                  mean=(0.548, 0.504, 0.479), std=(0.237, 0.247, 0.246)):
         self.img_paths = img_paths
         self.img_labels= img_labels
-        self.transform = A.Compose([
-            A.Resize(height=height,width=width),
-            A.Normalize(mean=mean, std=std),
-            ToTensorV2()
-        ])
-
-        # self.transform = A.Compose([
-        #     A.CenterCrop(300,250,p=1.0),
-        #     A.Normalize(mean=mean, std=std),
-        #     ToTensorV2()
-        #     ])
+        if self.img_labels !=None:
+            self.transform = A.Compose([
+                A.Normalize(mean=mean, std=std),
+                A.CenterCrop(350,280,p=1.0),
+                A.CoarseDropout(max_holes=50, max_height=8, max_width=8, min_holes=None, min_height=None, min_width=None, fill_value=0, mask_fill_value=None, always_apply=False, p=0.5),
+                A.Resize(height=height,width=width),
+                A.HorizontalFlip(p=0.5),
+                ToTensorV2()
+            ])
+        else:
+            self.transform = A.Compose([
+                A.Normalize(mean=mean, std=std),
+                A.Resize(height=height,width=width),
+                ToTensorV2()
+            ])
 
     def __getitem__(self, index):
         image = cv2.imread(self.img_paths[index])
