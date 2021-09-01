@@ -1,0 +1,5 @@
+{
+  "augmentation":{"_type":"choice","_value": ["CustomAugmentation1","CustomAugmentation1"]},
+  "model":{"_type":"choice","_value": ["MyModel1","thick_model"]},
+  "cutmix":{"_type":"choice","_value":[true,false]}
+}
