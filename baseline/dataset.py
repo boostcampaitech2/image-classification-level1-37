@@ -338,3 +338,30 @@ class TestDataset(Dataset):
 
     def __len__(self):
         return len(self.img_paths)
+
+    
+class SeudoDataset(Dataset):
+    def __init__(self,csv_path,img_path,transform=None):
+        self.image,self.label = self.labeling(csv_path,img_path)
+        self.transform = transform
+        
+    def __getitem__(self,idx):
+        image,label = Image.open(self.image[idx]),self.label[idx]
+        if self.transform:
+            image = self.transform(image)
+        return image,label
+
+    def __len__(self):
+            return len(self.label)
+
+    def labeling(self,csv_path,img_path):
+        x = []
+        y = []
+        seudo_csv=pd.read_csv(csv_path)
+        for i in range(len(seudo_csv)):
+            if ')' in seudo_csv['ans'][i]:
+                continue
+            x.append(os.path.join(img_path,seudo_csv['ImageID'][i]))
+            temp=int(seudo_csv['ans'][i])
+            y.append(torch.tensor(temp))
+        return x,y
