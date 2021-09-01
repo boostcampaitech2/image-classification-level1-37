@@ -518,9 +518,8 @@ def get_params():
     parser.add_argument('--resize_width', type=int, default=380, help='input batch size for training (default: 64)') # b4 380 ,b5 456 ,b6 528 ,b7 600 
     parser.add_argument('--batch_size', type=int, default=32, help='input batch size for training (default: 64)')
     parser.add_argument('--valid_batch_size', type=int, default=64, help='input batch size for validing (default: 1000)')
-    parser.add_argument('--model', type=str, default='MyModel', help='model type (default: BaseModel)')
+    parser.add_argument('--model', type=str, default='EffnetModel', help='model (EffnetModel, TimmModel)')
     parser.add_argument('--model_type', type=str, default='b3', help='model type (range: b4_timm,b0~b7)')
-    parser.add_argument('--model_package', type=str, default='timm', help='model package (range: timm, EffNet)')
     parser.add_argument('--optimizer', type=str, default='Adam', help='optimizer type (default: Adam)')
     parser.add_argument('--lr', type=float, default=1e-4, help='learning rate (default: 1e-3)')
     parser.add_argument('--val_ratio', type=float, default=0.2, help='ratio for validaton (default: 0.2)')
