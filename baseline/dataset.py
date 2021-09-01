@@ -93,11 +93,6 @@ class CustomAugmentation_2243:
     def __call__(self, image):
         return self.transform(image=image)
 
-train_transform = T.Compose([
-    
-])
-
-
 class MaskLabels(int, Enum):
     MASK = 0
     INCORRECT = 1
