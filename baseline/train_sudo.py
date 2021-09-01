@@ -310,7 +310,7 @@ def train(args):
                                                             pin_memory=use_cuda,
                                                             drop_last=False)
             
-            for epoch in range(args['epochs']):
+            for epoch in range(i+2):
                 f1_value_item = []
                 loss_value_item = []
                 matches_item = []
