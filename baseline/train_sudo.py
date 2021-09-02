@@ -234,12 +234,12 @@ def train(args):
                 logger.add_scalar("Train/f1", train_f1, epoch * len(train_loader) + idx)
                 logger.add_scalar("Train/loss", train_loss, epoch * len(train_loader) + idx)
                 logger.add_scalar("Train/accuracy", train_acc, epoch * len(train_loader) + idx)
-            
+                scheduler.step()
         
         f1 = np.sum(f1_value_item) / len(train_loader)
         loss = np.sum(loss_value_item) / len(train_loader)
         acc = np.sum(matches_item) / len(dataset)
-        scheduler.step()
+        
 
         if f1 > best_val_f1:
             print(f"New best model for val f1 score : {f1:4.2%}! saving the best model..")
