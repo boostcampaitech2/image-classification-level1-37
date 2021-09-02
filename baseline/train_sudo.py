@@ -358,17 +358,17 @@ def train(args):
                     logger.add_scalar("Train/accuracy", train_acc, epoch * len(train_loader) + idx)
                     scheduler.step()
             
-            f1 = np.sum(f1_value_item) / len(train_loader)
-            loss = np.sum(loss_value_item) / len(train_loader)
-            acc = np.sum(matches_item) / len(train_loader)
+                f1 = np.sum(f1_value_item) / len(train_loader)
+                loss = np.sum(loss_value_item) / len(train_loader)
+                acc = np.sum(matches_item) / len(train_loader)
 
-            if f1 > best_val_f1:
-                print(f"New best model for val f1 score : {f1:4.2%}! saving the best model..")
-                torch.save(model.module.state_dict(), f"{save_dir}/best.pth")
-                best_val_f1 = f1
-                best_val_acc = acc
-                best_val_loss = loss
-            torch.save(model.module.state_dict(), f"{save_dir}/last.pth")   
+                if f1 > best_val_f1:
+                    print(f"New best model for val f1 score : {f1:4.2%}! saving the best model..")
+                    torch.save(model.module.state_dict(), f"{save_dir}/best.pth")
+                    best_val_f1 = f1
+                    best_val_acc = acc
+                    best_val_loss = loss
+                torch.save(model.module.state_dict(), f"{save_dir}/last.pth")   
             
 
 
