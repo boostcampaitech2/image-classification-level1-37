@@ -144,8 +144,11 @@ def train(args):
     weights = weights_module(train_data_labels)
     class_weights = weights.get_weights(args['weights_type'])
     class_weights = torch.FloatTensor(class_weights).to(device)
-
-    criterion = create_criterion(args['criterion'], weight=class_weights)  # default: cross_entropy
+    if args['criterion'] == "su":
+        criterion = create_criterion(args['criterion'], weight=class_weights,reduction='sum')  # default: cross_entropy
+    else:
+        criterion = create_criterion(args['criterion'])  # default: cross_entropy
+        
     if args['optimizer'].lower()=="AdamP":
         opt_module = getattr(import_module("adamp"), args['optimizer'])
     else:
@@ -394,12 +397,12 @@ def get_params():
     parser.add_argument('--lr_decay_step', type=int, default=100, help='learning rate scheduler decay step (default: 20)')
     parser.add_argument('--log_interval', type=int, default=50, help='how many batches to wait before logging training status')
     parser.add_argument('--name', default='exp', help='model save at {SM_MODEL_DIR}/{name}')
-    parser.add_argument('--weights_type', type=str, default='class_weights_sklearn', help='weights_vanilla(1-x/sum(x)), class_weights_sklearn(len(x)/(classes*freq)) (default: weights_vanilla)')
+    parser.add_argument('--weights_type', type=str, default='su', help='weights_vanilla(1-x/sum(x)), class_weights_sklearn(len(x)/(classes*freq)) (default: weights_vanilla)')
     parser.add_argument('--beta1', type=int, default=1, help='cutmix beta (default : 1)')
     parser.add_argument('--beta2', type=int, default=1, help='cutmix beta (default : 1)')
-    parser.add_argument('--cutmix', type=bool, default=True, help='adjust cut mix(dafault=True')
+    parser.add_argument('--cutmix', type=bool, default=False, help='adjust cut mix(dafault=True')
     parser.add_argument('--threshold', type=float, default=0.7, help='threshold')
-    parser.add_argument('--sudo_train', type=int, default=3, help='train_with_sudo_labels')
+    parser.add_argument('--sudo_train', type=int, default=1, help='train_with_sudo_labels')
     
     # Container environment
     parser.add_argument('--data_dir', type=str, default=os.environ.get('SM_CHANNEL_TRAIN', '/opt/ml/input/data/train/images'))

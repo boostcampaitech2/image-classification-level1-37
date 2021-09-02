@@ -68,5 +68,12 @@ class GetClassWeights:
                 raise ValueError("classes should have valid labels that are in y")
             return len(self.labels) / (len(le.classes_) *np.bincount(y_ind).astype(np.float64))
         
+        elif weights_type =="su":
+            label = torch.tensor(self.labels)
+            label = label.unsqueeze(0)
+            label = label/torch.sum(label)
+            weights = 1.0 / label
+            return weights
+        
         else:
             raise NameError
