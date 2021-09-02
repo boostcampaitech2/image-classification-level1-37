@@ -18,10 +18,32 @@ IMG_EXTENSIONS = [
     ".jpg", ".JPG", ".jpeg", ".JPEG", ".png",
     ".PNG", ".ppm", ".PPM", ".bmp", ".BMP",
 ]
+"""albumentation 라이브러리를 사용할떄는 __call__ 함수를 수정해주세요 """
 
 
 def is_image_file(filename):
     return any(filename.endswith(extension) for extension in IMG_EXTENSIONS)
+
+def label_func(image_paths):
+    cnt = 0
+    if 'normal' in image_paths:
+        cnt += 12
+    elif 'incorrect_mask' in image_paths:
+        cnt += 6
+    else:
+        cnt += 0
+    if 'female' in image_paths:
+        cnt += 3
+    else:
+        cnt += 0
+    age = int(image_paths.split('_')[3][:2])
+    if age < 30:
+        cnt += 0
+    elif age < 58:
+        cnt += 1
+    else:
+        cnt += 2
+    return cnt
 
 
 class BaseAugmentation:
@@ -35,7 +57,7 @@ class BaseAugmentation:
         ])
 
     def __call__(self, image):
-        return self.transform(image=image)
+        return self.transform(image)
 
 
 class AddGaussianNoise(object):
@@ -56,42 +78,83 @@ class AddGaussianNoise(object):
 
 
 class CustomAugmentation:
-    def __init__(self, height,width, mean, std, **args):
+    def __init__(self, height, width, mean, std, **args):
         self.transform = A.Compose([
-            A.Resize(height=height,width=width),
+            A.Resize(height=height, width=width),
             A.Normalize(mean=mean, std=std),
             ToTensorV2(),
             # AddGaussianNoise()
         ])
 
     def __call__(self, image):
-        return self.transform(image=image)
-    
-    
-class CustomAugmentation_Max:
-    def __init__(self, height,width, mean, std, **args):
-        self.transform = A.Compose([
-                A.Normalize(mean=mean, std=std),
-                A.CenterCrop(350,280,p=1.0),
-                A.CoarseDropout(max_holes=50, max_height=8, max_width=8, min_holes=None, min_height=None, min_width=None, fill_value=0, mask_fill_value=None, always_apply=False, p=0.5),
-                A.Resize(height=height,width=width),
-                A.HorizontalFlip(p=0.5),
-                ToTensorV2()
-            ])
+        image = np.array(Image.open(image))
+        return self.transform(image=image)['iamge']
+
+class sj_augmentation(object):
+    """
+        transform 에 없는 기능들은 이런식으로 __init__, __call__, __repr__ 부분을
+        직접 구현하여 사용할 수 있습니다.
+    """
+
+    def __init__(self, height, width, mean=(0.548, 0.504, 0.479), std=(0.237, 0.247, 0.246),**args):
+        self.transform = transforms.Compose([
+            transforms.CenterCrop([300,250]),
+            transforms.RandomHorizontalFlip(0.5),
+            transforms.RandomRotation(15),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=mean, std=std)
+])
+
     def __call__(self, image):
-        return self.transform(image=image)
+        return self.transform(image)
+
+class sj_valid_augmentation(object):
+    """
+        transform 에 없는 기능들은 이런식으로 __init__, __call__, __repr__ 부분을
+        직접 구현하여 사용할 수 있습니다.
+    """
+    def __init__(self, height, width, mean=(0.548, 0.504, 0.479), std=(0.237, 0.247, 0.246), **args):
+        self.transform = transforms.Compose([
+            transforms.CenterCrop([300,250]),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=mean, std=std)
+])
+
+    def __call__(self, image):
+        return self.transform(image)
+
+
+class CustomAugmentation_Max:
+    def __init__(self, height, width, mean, std, **args):
+        self.transform = A.Compose([
+            A.Normalize(mean=mean, std=std),
+            A.CenterCrop(350, 280, p=1.0),
+            A.CoarseDropout(max_holes=50, max_height=8, max_width=8, min_holes=None, min_height=None, min_width=None,
+                            fill_value=0, mask_fill_value=None, always_apply=False, p=0.5),
+            A.Resize(height=height, width=width),
+            A.HorizontalFlip(p=0.5),
+            ToTensorV2()
+        ])
+
+    def __call__(self, image):
+        image = np.array(Image.open(image))
+        return self.transform(image=image)['iamge']
+
 
 class CustomAugmentation_2243:
-    def __init__(self, height,width, mean, std, **args):
+    def __init__(self, height, width, mean, std, **args):
         self.transform = A.Compose([
-            A.CenterCrop(300,250,p=1.0),
+            A.CenterCrop(300, 250, p=1.0),
             A.HorizontalFlip(p=0.5),
-            A.Rotate(limit=10,p=0.5),
+            A.Rotate(limit=10, p=0.5),
             A.Normalize(mean=mean, std=std),
             ToTensorV2()
         ])
+
     def __call__(self, image):
-        return self.transform(image=image)
+        image = np.array(Image.open(image))
+        return self.transform(image=image)['iamge']
+
 
 class MaskLabels(int, Enum):
     MASK = 0
@@ -175,7 +238,8 @@ class MaskBaseDataset(Dataset):
                 if _file_name not in self._file_names:  # "." 로 시작하는 파일 및 invalid 한 파일들은 무시합니다
                     continue
 
-                img_path = os.path.join(self.data_dir, profile, file_name)  # (resized_data, 000004_male_Asian_54, mask1.jpg)
+                img_path = os.path.join(self.data_dir, profile,
+                                        file_name)  # (resized_data, 000004_male_Asian_54, mask1.jpg)
                 mask_label = self._file_names[_file_name]
 
                 id, gender, race, age = profile.split("_")
@@ -209,18 +273,14 @@ class MaskBaseDataset(Dataset):
         assert self.transform is not None, ".set_tranform 메소드를 이용하여 transform 을 주입해주세요"
 
         image = self.read_image(index)
-        # image = np.array(image) # 추가######
 
         mask_label = self.get_mask_label(index)
         gender_label = self.get_gender_label(index)
         age_label = self.get_age_label(index)
         multi_class_label = self.encode_multi_class(mask_label, gender_label, age_label)
+        image_transform = self.transform(image)
 
-        image_transform = self.transform(image=image)
-        if type(image_transform) == dict:
-            return image_transform['image'], multi_class_label
-        else:
-            return image_transform, multi_class_label
+        return image_transform, multi_class_label
 
     def __len__(self):
         return len(self.image_paths)
@@ -236,8 +296,7 @@ class MaskBaseDataset(Dataset):
 
     def read_image(self, index):
         image_path = self.image_paths[index]
-        # return Image.open(image_path)
-        return cv2.imread(image_path)
+        return Image.open(image_path)
 
     @staticmethod
     def encode_multi_class(mask_label, gender_label, age_label) -> int:
@@ -311,7 +370,8 @@ class MaskSplitByProfileDataset(MaskBaseDataset):
                     if _file_name not in self._file_names:  # "." 로 시작하는 파일 및 invalid 한 파일들은 무시합니다
                         continue
 
-                    img_path = os.path.join(self.data_dir, profile, file_name)  # (resized_data, 000004_male_Asian_54, mask1.jpg)
+                    img_path = os.path.join(self.data_dir, profile,
+                                            file_name)  # (resized_data, 000004_male_Asian_54, mask1.jpg)
                     mask_label = self._file_names[_file_name]
 
                     id, gender, race, age = profile.split("_")
@@ -322,7 +382,7 @@ class MaskSplitByProfileDataset(MaskBaseDataset):
                     self.mask_labels.append(mask_label)
                     self.gender_labels.append(gender_label)
                     self.age_labels.append(age_label)
-                    self.output_labels.append(self.encode_multi_class(mask_label,gender_label,age_label))
+                    self.output_labels.append(self.encode_multi_class(mask_label, gender_label, age_label))
 
                     self.indices[phase].append(cnt)
                     cnt += 1
@@ -332,23 +392,24 @@ class MaskSplitByProfileDataset(MaskBaseDataset):
 
 
 class TestDataset(Dataset):
-    def __init__(self, img_paths, height, width, img_labels=None, 
+    def __init__(self, img_paths, height, width, img_labels=None,
                  mean=(0.548, 0.504, 0.479), std=(0.237, 0.247, 0.246)):
         self.img_paths = img_paths
-        self.img_labels= img_labels
-        if self.img_labels !=None:
+        self.img_labels = img_labels
+        if self.img_labels != None:
             self.transform = A.Compose([
                 A.Normalize(mean=mean, std=std),
-                A.CenterCrop(350,280,p=1.0),
-                A.CoarseDropout(max_holes=50, max_height=8, max_width=8, min_holes=None, min_height=None, min_width=None, fill_value=0, mask_fill_value=None, always_apply=False, p=0.5),
-                A.Resize(height=height,width=width),
+                A.CenterCrop(350, 280, p=1.0),
+                A.CoarseDropout(max_holes=50, max_height=8, max_width=8, min_holes=None, min_height=None,
+                                min_width=None, fill_value=0, mask_fill_value=None, always_apply=False, p=0.5),
+                A.Resize(height=height, width=width),
                 A.HorizontalFlip(p=0.5),
                 ToTensorV2()
             ])
         else:
             self.transform = A.Compose([
                 A.Normalize(mean=mean, std=std),
-                A.Resize(height=height,width=width),
+                A.Resize(height=height, width=width),
                 ToTensorV2()
             ])
 
@@ -361,7 +422,6 @@ class TestDataset(Dataset):
                 return image['image'], self.img_labels[index]
             else:
                 return image['image']
-
 
     def __len__(self):
         return len(self.img_paths)
