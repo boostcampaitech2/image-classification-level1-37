@@ -166,6 +166,8 @@ def train(args):
     img_root = os.path.join(args['data_dir_sudo'], 'images')
     info_path = os.path.join(args['data_dir_sudo'], 'info.csv')
     csvfile_path = os.path.join(args['output_dir'], 'sudo_output.csv')
+    os.makedirs(args['output_dir'],exist_ok=True)
+
     info = pd.read_csv(info_path)
     img_paths = [os.path.join(img_root, img_id) for img_id in info.ImageID]
     TestDataset = getattr(import_module("dataset"), 'TestDataset')
