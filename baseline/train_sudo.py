@@ -55,7 +55,7 @@ def grid_image(np_images, gts, preds, n=16, shuffle=False):
         gt = gts[choice].item()
         pred = preds[choice].item()
         image = np_images[choice]
-        # title = f"gt: {gt}, pred: {pred}"
+        title = f"gt: {gt}, pred: {pred}"
         gt_decoded_labels = MaskBaseDataset.decode_multi_class(gt)
         pred_decoded_labels = MaskBaseDataset.decode_multi_class(pred)
         title = "\n".join([
@@ -91,6 +91,15 @@ def increment_path(path, exist_ok=False):
         i = [int(m.groups()[0]) for m in matches if m]
         n = max(i) + 1 if i else 2
         return f"{path}{n}"
+
+def increment_path_submission_path(path):
+    if any(f.startswith("submission") for f in os.listdir(path)):
+        files = glob.glob('sub*.csv')
+        files_number = [int(re.sub("[^\d+]","", file)) for file in files]
+        max_number = max(files_number)
+        return f"submission_{max_number+1}.csv"
+    else:
+        return f"submission_0.csv"
 
 def train(args):
     seed_everything(args['seed'])
@@ -139,20 +148,21 @@ def train(args):
     
     # -- loss & metric
     #loss weight
-    train_data_labels = dataset.output_labels
-    weights_module = getattr(import_module("utils"), "GetClassWeights")
-    weights = weights_module(train_data_labels)
-    class_weights = weights.get_weights(args['weights_type'])
-    class_weights = torch.FloatTensor(class_weights).to(device)
-    if args['criterion'] == "su":
-        criterion = create_criterion(args['criterion'], weight=class_weights,reduction='sum')  # default: cross_entropy
-    else:
-        criterion = create_criterion(args['criterion'])  # default: cross_entropy
+    class_weights=None
+    if args['weights_type'] != None:
+        train_data_labels = dataset.output_labels
+        weights_module = getattr(import_module("utils"), "GetClassWeights")
+        weights = weights_module(train_data_labels)
+        class_weights = weights.get_weights(args['weights_type'])
+        class_weights = torch.FloatTensor(class_weights).to(device)
+    
+    criterion = create_criterion(args['criterion'], weight=class_weights,reduction=args['reduction'])
 
     if args['optimizer'].lower()=="AdamP":
         opt_module = getattr(import_module("adamp"), args['optimizer'])
     else:
         opt_module = getattr(import_module("torch.optim"), args['optimizer'])  # default: SGD
+
     optimizer = opt_module(
         filter(lambda p: p.requires_grad, model.parameters()),
         lr=args['lr'],
@@ -165,22 +175,32 @@ def train(args):
     with open(os.path.join(save_dir, 'config.json'), 'w', encoding='utf-8') as f:
         json.dump(args, f, ensure_ascii=False, indent=4)
 
-    # -- pesudo labeling config
-    img_root = os.path.join(args['data_dir_sudo'], 'images')
-    info_path = os.path.join(args['data_dir_sudo'], 'info.csv')
-    csvfile_path = os.path.join(args['output_dir'], 'sudo_output.csv')
+    # -- pesudo labeling
+    # create folder
     os.makedirs(args['output_dir'],exist_ok=True)
 
+    ## file path
+    img_root = os.path.join(args['data_dir_sudo'], 'images')
+    info_path = os.path.join(args['data_dir_sudo'], 'info.csv')
+    
+    ###submission file path
+    sub_filename = increment_path_submission_path(args['output_dir'])
+    submission_path = os.path.join(args['output_dir'], sub_filename)
+
+    #pesudo labeling dataset
     info = pd.read_csv(info_path)
     img_paths = [os.path.join(img_root, img_id) for img_id in info.ImageID]
     TestDataset = getattr(import_module("dataset"), 'TestDataset')
-    dataset = TestDataset(img_paths=img_paths,
+    sudo_dataset = TestDataset(img_paths=img_paths,
                           height=args['resize_height'],
                           width=args['resize_width'])
     
+    # sudo labeling activation function
     SoftMax=nn.Softmax(dim=1)
+
+    # sudo labeling loader
     sudo_loader = torch.utils.data.DataLoader(
-        dataset,
+        sudo_dataset,
         batch_size=args['batch_size'],
         num_workers=multiprocessing.cpu_count()//2,
         shuffle=False,
@@ -188,9 +208,9 @@ def train(args):
         drop_last=False,
     )
 
-    best_val_f1 = 0
-    best_val_acc = 0
-    best_val_loss = np.inf
+    best_train_f1 = 0
+    best_train_acc = 0
+    best_train_loss = np.inf
     for epoch in range(args['epochs']):
         # train loop
         model.train()
@@ -245,38 +265,38 @@ def train(args):
         scheduler.step()
         
 
-        if f1 > best_val_f1:
-            print(f"New best model for val f1 score : {f1:4.2%}! saving the best model..")
+        if f1 > best_train_f1:
+            print(f"New best model for train f1 score : {f1:4.2%}! saving the best model..")
             torch.save(model.module.state_dict(), f"{save_dir}/best.pth")
-            best_val_f1 = f1
-            best_val_acc = acc
-            best_val_loss = loss
+            best_train_f1 = f1
+            best_train_acc = acc
+            best_train_loss = loss
         torch.save(model.module.state_dict(), f"{save_dir}/last.pth")
             
         
 
         print(
-                f"[Val] f1 : {f1:4.2%}, acc : {acc:4.2%}, loss: {loss:4.2} || "
-                f"best f1 : {best_val_f1:4.2%}, best acc : {best_val_acc:4.2%}, best loss: {best_val_loss:4.2}"
+                f"[train] f1 : {f1:4.2%}, acc : {acc:4.2%}, loss: {loss:4.2} || "
+                f"best f1 : {best_train_f1:4.2%}, best acc : {best_train_acc:4.2%}, best loss: {best_train_loss:4.2}"
         )
-        logger.add_scalar("Val/f1", f1, epoch)
-        logger.add_scalar("Val/loss", loss, epoch)
-        logger.add_scalar("Val/accuracy", acc, epoch)
+        logger.add_scalar("train/f1", f1, epoch)
+        logger.add_scalar("train/loss", loss, epoch)
+        logger.add_scalar("train/accuracy", acc, epoch)
         
-        nni.report_intermediate_result(best_val_f1)
-        logger_p.debug('test accuracy(val) is %g', f1)
-        logger_p.debug('test accuracy(best) is %g', best_val_f1)
+        nni.report_intermediate_result(best_train_f1)
+        logger_p.debug('test accuracy(train) is %g', f1)
+        logger_p.debug('test accuracy(best) is %g', best_train_f1)
     
-    nni.report_final_result(best_val_f1)
-    logger_p.debug('Final result(f1 score) is %g', best_val_f1)
+    nni.report_final_result(best_train_f1)
+    logger_p.debug('Final result(f1 score) is %g', best_train_f1)
     logger_p.debug('Send final result done.')
     
-    for i in range(args['sudo_train']):
+    print("Calculating pesudo labeling..")
+    for i in range(args['epoch_sudo_labeling']):
         model.eval()
-        print("Calculating pesudo labeling results..")
         preds = []
         with torch.no_grad():
-            if i+1 < args['sudo_train']:
+            if i+1 < args['epoch_sudo_labeling']:
                 for idx, images in enumerate(tqdm(sudo_loader)):
                     images = images.to(device)
                     pred = model(images)
@@ -284,7 +304,6 @@ def train(args):
                     prob_bool=torch.argmax(prob,dim=-1)>=args['threshold']
                     prob_argmax=torch.argmax(prob,dim=-1)
                     for j in range(len(prob_bool)):
-
                         if prob_bool[j]:
                             preds.append(prob_argmax[j].cpu().numpy())
                         else:
@@ -297,27 +316,27 @@ def train(args):
                     preds.extend(pred.cpu().numpy())
 
         info['ans'] = preds
-        info.to_csv(csvfile_path, index=False)
+        info.to_csv(submission_path, index=False)
 
-        if i+1 < args['sudo_train']:
-            model.train()
-            info_train = pd.read_csv(csvfile_path)
+        model.train()
+        if i+1 < args['epoch_sudo_labeling']:
+            info_train = pd.read_csv(submission_path)
             info_train = info_train[info_train.ans!=100]
             img_paths_train = [os.path.join(img_root, img_id) for img_id in info_train.ImageID]
             img_labels_train = [int(label) for label in info_train.ans]
-            dataset_train = TestDataset(img_paths=img_paths_train,
-                                        img_labels=img_labels_train,
-                                        height=args['resize_height'],
-                                        width=args['resize_width'])
+            sudo_dataset_train = TestDataset(img_paths=img_paths_train,
+                                            img_labels=img_labels_train,
+                                            height=args['resize_height'],
+                                            width=args['resize_width'])
 
-            sudo_loader_train = torch.utils.data.DataLoader(dataset_train,
+            sudo_loader_train = torch.utils.data.DataLoader(sudo_dataset_train,
                                                             num_workers=multiprocessing.cpu_count()//2,
                                                             batch_size=args['batch_size'],
                                                             shuffle=False,
                                                             pin_memory=use_cuda,
                                                             drop_last=False)
             
-            for epoch in range(i+2):
+            for epoch in range(i+2): # sudo-labeling 누적 시행 횟수+2씩 sudo labeling data로 추가 학습
                 f1_value_item = []
                 loss_value_item = []
                 matches_item = []
@@ -365,7 +384,7 @@ def train(args):
             
                 f1 = np.sum(f1_value_item) / len(train_loader)
                 loss = np.sum(loss_value_item) / len(train_loader)
-                acc = np.sum(matches_item) / len(train_loader)
+                acc = np.sum(matches_item) / len(sudo_dataset_train)
                 scheduler.step()
 
                 if f1 > best_val_f1:
@@ -395,16 +414,17 @@ def get_params():
     parser.add_argument('--optimizer', type=str, default='Adam', help='optimizer type (default: Adam)')
     parser.add_argument('--lr', type=float, default=1e-4, help='learning rate (default: 1e-3)')
     parser.add_argument('--criterion', type=str, default='cross_entropy', help='criterion type (default: cross_entropy)')
+    parser.add_argument('--reduction', type=str, default='sum', help='criterion reduction type (default: mean)')
     parser.add_argument('--lr_decay_step', type=int, default=100, help='learning rate scheduler decay step (default: 20)')
     parser.add_argument('--log_interval', type=int, default=50, help='how many batches to wait before logging training status')
     parser.add_argument('--name', default='exp', help='model save at {SM_MODEL_DIR}/{name}')
-    parser.add_argument('--weights_type', type=str, default='su', help='weights_vanilla(1-x/sum(x)), class_weights_sklearn(len(x)/(classes*freq)) (default: weights_vanilla)')
+    parser.add_argument('--weights_type', type=str, default='None', help=' weights type (default: None)')
     parser.add_argument('--beta1', type=int, default=1, help='cutmix beta (default : 1)')
     parser.add_argument('--beta2', type=int, default=1, help='cutmix beta (default : 1)')
     parser.add_argument('--cutmix', type=bool, default=False, help='adjust cut mix(dafault=True')
     parser.add_argument('--threshold', type=float, default=0.7, help='threshold')
-    parser.add_argument('--sudo_train', type=int, default=1, help='train_with_sudo_labels')
-    
+    parser.add_argument('--epoch_sudo_labeling', type=int, default=1, help='train_with_sudo_labels')
+
     # Container environment
     parser.add_argument('--data_dir', type=str, default=os.environ.get('SM_CHANNEL_TRAIN', '/opt/ml/input/data/train/images'))
     parser.add_argument('--model_dir', type=str, default=os.environ.get('SM_MODEL_DIR', './model'))
