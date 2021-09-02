@@ -6,11 +6,11 @@ def ensemble(file_path):
     #read csv files
     data = pd.read_csv("/".join([file_path, "info.csv"]))
     data1 = pd.read_csv("/".join([file_path, "submission_1.csv"])) # efficientnet_b5(tf)
-    data2 = pd.read_csv("/".join([file_path, "submission_2.csv"])) # efficientnet_b3
-    data3 = pd.read_csv("/".join([file_path, "submission_3.csv"]))
-    data4 = pd.read_csv("/".join([file_path, "submission_4.csv"]))
-    data5 = pd.read_csv("/".join([file_path, "submission_5.csv"]))
-    data6 = pd.read_csv("/".join([file_path, "submission_6.csv"]))
+    data2 = pd.read_csv("/".join([file_path, "submission_2.csv"])) # efficientnet_b3(dropout)
+    data3 = pd.read_csv("/".join([file_path, "submission_3.csv"])) # efficientnet_b6(tf)
+    data4 = pd.read_csv("/".join([file_path, "submission_4.csv"])) # efficientnet_b4
+    data5 = pd.read_csv("/".join([file_path, "submission_5.csv"])) # efficientnet_b3(tf, epoch12)
+    data6 = pd.read_csv("/".join([file_path, "submission_6.csv"])) # efficientnet_b3(tf, epoch20)
 
     #har voting
     all_predictions = []
@@ -30,6 +30,7 @@ def ensemble(file_path):
 
     #save submission csv
     data.to_csv("/".join([file_path, "info.csv"]), index=False)
+    print("Done!!")
 
 
 if __name__=="__main__":
