@@ -148,7 +148,7 @@ def train(args):
         criterion = create_criterion(args['criterion'], weight=class_weights,reduction='sum')  # default: cross_entropy
     else:
         criterion = create_criterion(args['criterion'])  # default: cross_entropy
-        
+
     if args['optimizer'].lower()=="AdamP":
         opt_module = getattr(import_module("adamp"), args['optimizer'])
     else:
@@ -325,41 +325,41 @@ def train(args):
                     inputs = inputs.to(device)
                     labels = labels.to(device)
                 
-                if args['cutmix']==True:
-                    rand_bbox_module = getattr(import_module("utils"), 'rand_bbox')
-                    rand_bbox = rand_bbox_module(inputs=inputs,
-                                                labels=labels,
-                                                beta1=args['beta1'],
-                                                beta2=args['beta2'],
-                                                random_seed=args['seed'])
-                    inputs, lam, target_a, target_b = rand_bbox.get_cutmiximage_and_lam()
+                    if args['cutmix']==True:
+                        rand_bbox_module = getattr(import_module("utils"), 'rand_bbox')
+                        rand_bbox = rand_bbox_module(inputs=inputs,
+                                                    labels=labels,
+                                                    beta1=args['beta1'],
+                                                    beta2=args['beta2'],
+                                                    random_seed=args['seed'])
+                        inputs, lam, target_a, target_b = rand_bbox.get_cutmiximage_and_lam()
 
-                optimizer.zero_grad()
-                outs = model(inputs)
-                preds = torch.argmax(outs, dim=-1)
+                    optimizer.zero_grad()
+                    outs = model(inputs)
+                    preds = torch.argmax(outs, dim=-1)
                 
-                if args['cutmix']==True:
-                    loss = criterion(outs, target_a) * lam + criterion(outs, target_b) * (1. - lam)
-                else:
-                    loss = criterion(outs, labels)
+                    if args['cutmix']==True:
+                        loss = criterion(outs, target_a) * lam + criterion(outs, target_b) * (1. - lam)
+                    else:
+                        loss = criterion(outs, labels)
 
-                loss.backward()
-                optimizer.step()
-                f1_value_item.append(get_f1_score(labels,preds).item())
-                loss_value_item.append(loss.item())
-                matches_item.append((preds == labels).sum().item())
-                if (idx + 1) % args['log_interval'] == 0:
-                    train_f1 = np.sum(f1_value_item) / (idx + 1)
-                    train_loss = np.sum(loss_value_item) / (idx + 1)
-                    train_acc = np.sum(matches_item) / args['batch_size'] / (idx + 1)
-                    current_lr = get_lr(optimizer)
-                    print(
-                        f"Epoch[{epoch+1}/{args['epochs']}]({idx + 1}/{len(train_loader)}) || "
-                        f"training f1 {train_f1:4.4} ||training loss {train_loss:4.4} || training accuracy {train_acc:4.2%} || lr {current_lr}"
-                    )
-                    logger.add_scalar("Train/f1", train_f1, epoch * len(train_loader) + idx)
-                    logger.add_scalar("Train/loss", train_loss, epoch * len(train_loader) + idx)
-                    logger.add_scalar("Train/accuracy", train_acc, epoch * len(train_loader) + idx)
+                    loss.backward()
+                    optimizer.step()
+                    f1_value_item.append(get_f1_score(labels,preds).item())
+                    loss_value_item.append(loss.item())
+                    matches_item.append((preds == labels).sum().item())
+                    if (idx + 1) % args['log_interval'] == 0:
+                        train_f1 = np.sum(f1_value_item) / (idx + 1)
+                        train_loss = np.sum(loss_value_item) / (idx + 1)
+                        train_acc = np.sum(matches_item) / args['batch_size'] / (idx + 1)
+                        current_lr = get_lr(optimizer)
+                        print(
+                            f"Epoch[{epoch+1}/{args['epochs']}]({idx + 1}/{len(train_loader)}) || "
+                            f"training f1 {train_f1:4.4} ||training loss {train_loss:4.4} || training accuracy {train_acc:4.2%} || lr {current_lr}"
+                        )
+                        logger.add_scalar("Train/f1", train_f1, epoch * len(train_loader) + idx)
+                        logger.add_scalar("Train/loss", train_loss, epoch * len(train_loader) + idx)
+                        logger.add_scalar("Train/accuracy", train_acc, epoch * len(train_loader) + idx)
                     
             
                 f1 = np.sum(f1_value_item) / len(train_loader)
