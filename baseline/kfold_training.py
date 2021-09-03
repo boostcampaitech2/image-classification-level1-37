@@ -156,13 +156,13 @@ def train(data_dir, model_dir, args):
         height =args.resize[1],
     )
 
+    # -- model
     model_module = getattr(import_module("model"), args.model)  # default: BaseModel
     model = model_module(
         num_classes=num_classes
     ).to(device)
     model = torch.nn.DataParallel(model)
 
-    # -- model
 
     # -- loss & metric
     criterion = create_criterion(args.criterion)  # default: cross_entropy
@@ -183,12 +183,7 @@ def train(data_dir, model_dir, args):
 
 
     for fold in range(args.kfold):
-        model_module = getattr(import_module("model"), args.model)  # default: BaseModel
-        model = model_module(
-            num_classes=num_classes
-        ).to(device)
-        model = torch.nn.DataParallel(model)
-
+        model.param_init()
         best_val_acc = 0
         best_val_loss = np.inf
         train_image_paths, valid_image_paths = [], []
