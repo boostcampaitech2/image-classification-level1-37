@@ -19,7 +19,7 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
-from dataset import MaskBaseDataset
+from dataset import MaskBaseDataset,sj_MaskDataset
 from loss import create_criterion
 
 # 석진님 여기 label_fold 쪽에 주석 좀 달아주세요
@@ -156,13 +156,13 @@ def train(data_dir, model_dir, args):
         height =args.resize[1],
     )
 
-
-    # -- model
     model_module = getattr(import_module("model"), args.model)  # default: BaseModel
     model = model_module(
         num_classes=num_classes
     ).to(device)
     model = torch.nn.DataParallel(model)
+
+    # -- model
 
     # -- loss & metric
     criterion = create_criterion(args.criterion)  # default: cross_entropy
@@ -183,6 +183,12 @@ def train(data_dir, model_dir, args):
 
 
     for fold in range(args.kfold):
+        model_module = getattr(import_module("model"), args.model)  # default: BaseModel
+        model = model_module(
+            num_classes=num_classes
+        ).to(device)
+        model = torch.nn.DataParallel(model)
+
         best_val_acc = 0
         best_val_loss = np.inf
         train_image_paths, valid_image_paths = [], []
@@ -286,7 +292,7 @@ def train(data_dir, model_dir, args):
                     best_val_acc = val_acc
                 torch.save(model.module.state_dict(), f"{save_dir}/last.pth")
                 print(
-                    f"[Val] acc : {val_acc:4.2%}, loss: {val_loss:4.2} || "
+                    f"{fold}\n[Val] acc : {val_acc:4.2%}, loss: {val_loss:4.2} || "
                     f"best acc : {best_val_acc:4.2%}, best loss: {best_val_loss:4.2}"
                 )
                 logger.add_scalar("Val/loss", val_loss, epoch)
@@ -306,19 +312,19 @@ if __name__ == '__main__':
     parser.add_argument('--seed', type=int, default=37, help='random seed (default: 37)')
     parser.add_argument('--epochs', type=int, default=10, help='number of epochs to train (default: 10)')
     parser.add_argument('--dataset', type=str, default='sj_MaskDataset', help='dataset augmentation type (default: MaskBaseDataset)')
-    parser.add_argument('--augmentation', type=str, default='sj_augmentation', help='data augmentation type (default: BaseAugmentation)')
-    parser.add_argument('--valid_augmentation', default='sj_valid_augmentation', help='model save at {SM_MODEL_DIR}/{name}')
+    parser.add_argument('--augmentation', type=str, default='suckjin_augmentation', help='data augmentation type (default: BaseAugmentation)')
+    parser.add_argument('--valid_augmentation', default='suckjin_valid_augmentation', help='model save at {SM_MODEL_DIR}/{name}')
     parser.add_argument("--resize", nargs="+", type=list, default=[96, 128], help='resize size for image when training')
     parser.add_argument('--batch_size', type=int, default=32, help='input batch size for training (default: 32)')
     parser.add_argument('--valid_batch_size', type=int, default=32, help='input batch size for validing (default: 1000)')
-    parser.add_argument('--kfold', type=int, default='5', help=' kfold num')
+    parser.add_argument('--kfold', type=int, default=5, help=' kfold num')
     parser.add_argument('--model', type=str, default='BaseModel', help='model type (default: BaseModel)')
     parser.add_argument('--optimizer', type=str, default='Adam', help='optimizer type (default: Adam)')
     parser.add_argument('--lr', type=float, default=1e-4, help='learning rate (default: 1e-4)')
     parser.add_argument('--val_ratio', type=float, default=0.2, help='ratio for validaton (default: 0.2)')
     parser.add_argument('--criterion', type=str, default='cross_entropy', help='criterion type (default: cross_entropy)')
     parser.add_argument('--lr_decay_step', type=int, default=20, help='learning rate scheduler deacy step (default: 20)')
-    parser.add_argument('--log_interval', type=int, default=20, help='how many batches to wait before logging training status')
+    parser.add_argument('--log_interval', type=int, default=50, help='how many batches to wait before logging training status')
     parser.add_argument('--name', default='exp', help='model save at {SM_MODEL_DIR}/{name}')
 
     # Container environment
