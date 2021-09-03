@@ -205,7 +205,6 @@ def train(data_dir, model_dir, args):
             num_workers=multiprocessing.cpu_count() // 2,
             shuffle=True,
             pin_memory=use_cuda,
-            drop_last=True,
         )
 
         val_loader = DataLoader(
@@ -214,7 +213,6 @@ def train(data_dir, model_dir, args):
             num_workers=multiprocessing.cpu_count() // 2,
             shuffle=False,
             pin_memory=use_cuda,
-            drop_last=True,
         )
         for epoch in range(args.epochs):
             # train loop

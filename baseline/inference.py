@@ -159,18 +159,16 @@ def kfold_inference(data_dir, model_dir, output_dir, args):
         )
 
         print(fold,"Calculating inference results..")
-        preds = []
+        prediction_array = []
         with torch.no_grad():
             for idx, images in enumerate(loader):
                 images = images.to(device)
                 pred = model(images)
-                pred = pred.argmax(dim=-1)
-                preds.extend(pred.cpu().numpy())
+                pred = pred.cpu().detach().numpy()
+                prediction_array.extend(pred)
 
-        all_predictions.append(np.array(preds)[..., np.newaxis])
-    np.argmax(np.mean(np.concatenate(all_predictions, axis=2), axis=2), axis=1)
-
-    info['ans'] = np.argmax(np.mean(np.concatenate(all_predictions, axis=2), axis=2), axis=1)
+        all_predictions.append(np.array(prediction_array)[..., np.newaxis])
+        info['ans'] = np.argmax(np.mean(np.concatenate(all_predictions, axis=2), axis=2), axis=1)
     info.to_csv(os.path.join(output_dir, f'output.csv'), index=False)
     print(f'Inference Done!')
 
