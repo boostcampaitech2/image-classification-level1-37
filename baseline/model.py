@@ -62,10 +62,17 @@ class sjmodel(nn.Module):
                                                        num_classes=num_classes)
         if model_type=="b4":
             self.model_name._dropout = nn.Dropout(p=0.7, inplace=False)
+        self.num_classes = num_classes
             
     def forward(self, x):
         x = F.relu(self.model_name(x))
         return x
+    
+    def param_init(self):
+        self.model_name = EfficientNet.from_pretrained(f'efficientnet-{self.model_type}',
+                                                       in_channels=3,
+                                                       num_classes=self.num_classes)
+
 
 class sumodel(nn.Module):
     def __init__(self, num_classes, model_type):
