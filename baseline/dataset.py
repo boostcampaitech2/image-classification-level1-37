@@ -390,6 +390,21 @@ class MaskSplitByProfileDataset(MaskBaseDataset):
     def split_dataset(self) -> List[Subset]:
         return [Subset(self, indices) for phase, indices in self.indices.items()]
 
+class sj_MaskDataset(MaskBaseDataset):
+    # image_paths는 path input/data/train/images/003277_female_Asian_19/mask3.jpg 이런 식으로 들어온다.
+    def __init__(self, image_paths, transform=None, mean=(0.548, 0.504, 0.479), std=(0.237, 0.247, 0.246),):
+        self.image_paths = image_paths
+        self.transform = transform
+        self.mean = mean
+        self.std = std
+    def __len__(self):
+        return len(self.image_paths)
+
+    def __getitem__(self, idx):
+        image = Image.open(self.image_paths[idx])
+        image = self.transform(image)
+        label = label_func(self.image_paths[idx])
+        return image, label
 
 class TestDataset(Dataset):
     def __init__(self, img_paths, height, width, img_labels=None,
