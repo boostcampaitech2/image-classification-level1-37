@@ -13,7 +13,8 @@ from dataset import TestDataset, MaskBaseDataset
 def load_model(saved_model, num_classes, device):
     model_cls = getattr(import_module("model"), args.model)
     model = model_cls(
-        num_classes=num_classes
+        num_classes=num_classes,
+        model_type = args.model_type
     )
 
     # tarpath = os.path.join(saved_model, 'best.tar.gz')
@@ -176,16 +177,16 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
     # Data and model checkpoints directories
-    parser.add_argument('--batch_size', type=int, default=64, help='input batch size for validing (default: 1000)')
+    parser.add_argument('--batch_size', type=int, default=64, help='input batch size for validing (default: 1000), sj_model : 16')
     parser.add_argument('--height', type=int, default=244, help='resize height for image when you trained ')
     parser.add_argument('--width', type=int, default=224, help='resize width for image when you trained')
-    parser.add_argument('--model', type=str, default='EffnetModel', help='model (EffnetModel, TimmModel)')
+    parser.add_argument('--model', type=str, default='EffnetModel', help='model (EffnetModel, TimmModel,sj_model)')
     parser.add_argument('--model_type', type=str, default='b3', help='model type (range: b4_timm,b0~b7)')
     parser.add_argument('--kfold', type=int, default=5, help='kfold num')
 
     # Container environment
     parser.add_argument('--data_dir', type=str, default=os.environ.get('SM_CHANNEL_EVAL', '/opt/ml/input/data/eval'))
-    parser.add_argument('--model_dir', type=str, default=os.environ.get('SM_CHANNEL_MODEL', './model/exp8'))
+    parser.add_argument('--model_dir', type=str, default=os.environ.get('SM_CHANNEL_MODEL', './model/exp8')) # exp8는 best, last찍힌 위치
     parser.add_argument('--output_dir', type=str, default=os.environ.get('SM_OUTPUT_DATA_DIR', './output'))
 
     args = parser.parse_args()
