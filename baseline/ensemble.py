@@ -1,28 +1,20 @@
 import os
 import pandas as pd
 from collections import Counter
-
-def ensemble(file_path):
+import pdb
+def ensemble(file_path, ensemble_csv_list):
     #read csv files
-    data = pd.read_csv("/".join([file_path, "info.csv"]))
-    data1 = pd.read_csv("/".join([file_path, "submission_1.csv"])) # efficientnet_b5(tf)
-    data2 = pd.read_csv("/".join([file_path, "submission_2.csv"])) # efficientnet_b3(dropout)
-    data3 = pd.read_csv("/".join([file_path, "submission_3.csv"])) # efficientnet_b6(tf)
-    data4 = pd.read_csv("/".join([file_path, "submission_4.csv"])) # efficientnet_b4
-    data5 = pd.read_csv("/".join([file_path, "submission_5.csv"])) # efficientnet_b3(tf, epoch12)
-    data6 = pd.read_csv("/".join([file_path, "submission_6.csv"])) # efficientnet_b3(tf, epoch20)
+    data = pd.read_csv(os.path.join(file_path, "info.csv"))
+    data_ensemble = {}
+    for i in range(len(ensemble_csv_list)):
+        data_ensemble[i] = pd.read_csv(os.path.join(file_path, ensemble_csv_list[i]))
 
     #har voting
     all_predictions = []
     for i in range(len(data)):
-        outputs = [
-                   data1.ans[i], 
-                   data2.ans[i],
-                   data3.ans[i],
-                   data4.ans[i],
-                   data5.ans[i],
-                   data6.ans[i],
-                  ]
+        outputs = []
+        for key in data_ensemble.keys():
+            outputs.append(data_ensemble[key].ans[i])
         ans = Counter(outputs).most_common(1)
         all_predictions.append(ans[0][0])
 
@@ -35,4 +27,11 @@ def ensemble(file_path):
 
 if __name__=="__main__":
     file_path = "./output"
-    ensemble(file_path)
+    ensemble_csv_list = ["submission_1.csv",
+                         "submission_2.csv",
+                         "submission_3.csv",
+                         "submission_4.csv",
+                         "submission_5.csv",
+                         "submission_6.csv",
+                         ]
+    ensemble(file_path, ensemble_csv_list)

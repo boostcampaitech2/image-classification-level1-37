@@ -92,14 +92,14 @@ def increment_path(path, exist_ok=False):
         n = max(i) + 1 if i else 2
         return f"{path}{n}"
 
-def increment_path_submission_path(path):
-    if any(f.startswith("submission") for f in os.listdir(path)):
+def increment_path_sudo_path(path):
+    if any(f.startswith("sudo") for f in os.listdir(path)):
         files = glob.glob('sub*.csv')
         files_number = [int(re.sub("[^\d+]","", file)) for file in files]
         max_number = max(files_number)
-        return f"submission_{max_number+1}.csv"
+        return f"sudo_{max_number+1}.csv"
     else:
-        return f"submission_0.csv"
+        return f"sudo_0.csv"
 
 def train(args):
     seed_everything(args['seed'])
@@ -158,10 +158,10 @@ def train(args):
     
     criterion = create_criterion(args['criterion'], weight=class_weights,reduction=args['reduction'])
 
-    if args['optimizer'].lower()=="AdamP":
+    if args['optimizer'].lower()=="adamp": #different optimizer package
         opt_module = getattr(import_module("adamp"), args['optimizer'])
     else:
-        opt_module = getattr(import_module("torch.optim"), args['optimizer'])  # default: SGD
+        opt_module = getattr(import_module("torch.optim"), args['optimizer'])
 
     optimizer = opt_module(
         filter(lambda p: p.requires_grad, model.parameters()),
@@ -184,8 +184,8 @@ def train(args):
     info_path = os.path.join(args['data_dir_sudo'], 'info.csv')
     
     ###submission file path
-    sub_filename = increment_path_submission_path(args['output_dir'])
-    submission_path = os.path.join(args['output_dir'], sub_filename)
+    sub_filename = increment_path_sudo_path(args['output_dir'])
+    sudo_path = os.path.join(args['output_dir'], sub_filename)
 
     #pesudo labeling dataset
     info = pd.read_csv(info_path)
@@ -208,9 +208,9 @@ def train(args):
         drop_last=False,
     )
 
-    best_train_f1 = 0
-    best_train_acc = 0
-    best_train_loss = np.inf
+    best_f1 = 0
+    best_acc = 0
+    best_loss = np.inf
     for epoch in range(args['epochs']):
         # train loop
         model.train()
@@ -246,16 +246,16 @@ def train(args):
             loss_value_item.append(loss.item())
             matches_item.append((preds == labels).sum().item())
             if (idx + 1) % args['log_interval'] == 0:
-                train_f1 = np.sum(f1_value_item) / (idx + 1)
-                train_loss = np.sum(loss_value_item) / (idx + 1)
+                sudo_f1 = np.sum(f1_value_item) / (idx + 1)
+                sudo_loss = np.sum(loss_value_item) / (idx + 1)
                 train_acc = np.sum(matches_item) / args['batch_size'] / (idx + 1)
                 current_lr = get_lr(optimizer)
                 print(
                     f"Epoch[{epoch+1}/{args['epochs']}]({idx + 1}/{len(train_loader)}) || "
-                    f"training f1 {train_f1:4.4} ||training loss {train_loss:4.4} || training accuracy {train_acc:4.2%} || lr {current_lr}"
+                    f"training f1 {sudo_f1:4.4} ||training loss {sudo_loss:4.4} || training accuracy {train_acc:4.2%} || lr {current_lr}"
                 )
-                logger.add_scalar("Train/f1", train_f1, epoch * len(train_loader) + idx)
-                logger.add_scalar("Train/loss", train_loss, epoch * len(train_loader) + idx)
+                logger.add_scalar("Train/f1", sudo_f1, epoch * len(train_loader) + idx)
+                logger.add_scalar("Train/loss", sudo_loss, epoch * len(train_loader) + idx)
                 logger.add_scalar("Train/accuracy", train_acc, epoch * len(train_loader) + idx)
                 
         
@@ -265,135 +265,140 @@ def train(args):
         scheduler.step()
         
 
-        if f1 > best_train_f1:
+        if f1 > best_f1:
             print(f"New best model for train f1 score : {f1:4.2%}! saving the best model..")
             torch.save(model.module.state_dict(), f"{save_dir}/best.pth")
-            best_train_f1 = f1
-            best_train_acc = acc
-            best_train_loss = loss
+            best_f1 = f1
+            best_acc = acc
+            best_loss = loss
         torch.save(model.module.state_dict(), f"{save_dir}/last.pth")
             
-        
-
         print(
                 f"[train] f1 : {f1:4.2%}, acc : {acc:4.2%}, loss: {loss:4.2} || "
-                f"best f1 : {best_train_f1:4.2%}, best acc : {best_train_acc:4.2%}, best loss: {best_train_loss:4.2}"
+                f"best f1 : {best_f1:4.2%}, best acc : {best_acc:4.2%}, best loss: {best_loss:4.2}"
         )
         logger.add_scalar("train/f1", f1, epoch)
         logger.add_scalar("train/loss", loss, epoch)
         logger.add_scalar("train/accuracy", acc, epoch)
         
-        nni.report_intermediate_result(best_train_f1)
+        nni.report_intermediate_result(best_f1)
         logger_p.debug('test accuracy(train) is %g', f1)
-        logger_p.debug('test accuracy(best) is %g', best_train_f1)
+        logger_p.debug('test accuracy(best) is %g', best_f1)
     
-    nni.report_final_result(best_train_f1)
-    logger_p.debug('Final result(f1 score) is %g', best_train_f1)
-    logger_p.debug('Send final result done.')
+    logger_p.debug('Final train result(f1 score) is %g', best_f1)
+    logger_p.debug('Send final train result done.')
     
     print("Calculating pesudo labeling..")
-    for i in range(args['epoch_sudo_labeling']):
+    for i in range(args['epochs_SL']):
         model.eval()
         preds = []
         with torch.no_grad():
-            if i+1 < args['epoch_sudo_labeling']:
-                for idx, images in enumerate(tqdm(sudo_loader)):
-                    images = images.to(device)
-                    pred = model(images)
-                    prob=SoftMax(pred)
-                    prob_bool=torch.argmax(prob,dim=-1)>=args['threshold']
-                    prob_argmax=torch.argmax(prob,dim=-1)
-                    for j in range(len(prob_bool)):
-                        if prob_bool[j]:
-                            preds.append(prob_argmax[j].cpu().numpy())
-                        else:
-                            preds.append(100)
-            else:
-                for idx, images in enumerate(tqdm(sudo_loader)):
-                    images = images.to(device)
-                    pred = model(images)
-                    pred = pred.argmax(dim=-1)
-                    preds.extend(pred.cpu().numpy())
+            for idx, images in enumerate(tqdm(sudo_loader)):
+                images = images.to(device)
+                pred = model(images)
+                prob=SoftMax(pred)
+                prob_bool=torch.argmax(prob,dim=-1)>=args['threshold']
+                prob_argmax=torch.argmax(prob,dim=-1)
+                for j in range(len(prob_bool)):
+                    if prob_bool[j]:
+                        preds.append(prob_argmax[j].cpu().numpy())
+                    else:
+                        preds.append(100)
 
         info['ans'] = preds
-        info.to_csv(submission_path, index=False)
+        info.to_csv(sudo_path, index=False)
 
+        
+        info_train = pd.read_csv(sudo_path)
+        info_train = info_train[info_train.ans!=100]
+        img_paths_train = [os.path.join(img_root, img_id) for img_id in info_train.ImageID]
+        img_labels_train = [int(label) for label in info_train.ans]
+        sudo_dataset_train = TestDataset(img_paths=img_paths_train,
+                                        img_labels=img_labels_train,
+                                        height=args['resize_height'],
+                                        width=args['resize_width'])
+
+        sudo_loader_train = torch.utils.data.DataLoader(sudo_dataset_train,
+                                                        num_workers=multiprocessing.cpu_count()//2,
+                                                        batch_size=args['batch_size'],
+                                                        shuffle=False,
+                                                        pin_memory=use_cuda,
+                                                        drop_last=False)
         model.train()
-        if i+1 < args['epoch_sudo_labeling']:
-            info_train = pd.read_csv(submission_path)
-            info_train = info_train[info_train.ans!=100]
-            img_paths_train = [os.path.join(img_root, img_id) for img_id in info_train.ImageID]
-            img_labels_train = [int(label) for label in info_train.ans]
-            sudo_dataset_train = TestDataset(img_paths=img_paths_train,
-                                            img_labels=img_labels_train,
-                                            height=args['resize_height'],
-                                            width=args['resize_width'])
-
-            sudo_loader_train = torch.utils.data.DataLoader(sudo_dataset_train,
-                                                            num_workers=multiprocessing.cpu_count()//2,
-                                                            batch_size=args['batch_size'],
-                                                            shuffle=False,
-                                                            pin_memory=use_cuda,
-                                                            drop_last=False)
+        for epoch in range(i+2): # sudo-labeling 누적 시행 횟수+2씩 sudo labeling data로 추가 학습
+            f1_value_item = []
+            loss_value_item = []
+            matches_item = []
+            for idx, train_batch in enumerate(sudo_loader_train):
+                inputs, labels = train_batch
+                inputs = inputs.to(device)
+                labels = labels.to(device)
             
-            for epoch in range(i+2): # sudo-labeling 누적 시행 횟수+2씩 sudo labeling data로 추가 학습
-                f1_value_item = []
-                loss_value_item = []
-                matches_item = []
-                for idx, train_batch in enumerate(sudo_loader_train):
-                    inputs, labels = train_batch
-                    inputs = inputs.to(device)
-                    labels = labels.to(device)
-                
-                    if args['cutmix']==True:
-                        rand_bbox_module = getattr(import_module("utils"), 'rand_bbox')
-                        rand_bbox = rand_bbox_module(inputs=inputs,
-                                                    labels=labels,
-                                                    beta1=args['beta1'],
-                                                    beta2=args['beta2'],
-                                                    random_seed=args['seed'])
-                        inputs, lam, target_a, target_b = rand_bbox.get_cutmiximage_and_lam()
+                if args['cutmix']==True:
+                    rand_bbox_module = getattr(import_module("utils"), 'rand_bbox')
+                    rand_bbox = rand_bbox_module(inputs=inputs,
+                                                labels=labels,
+                                                beta1=args['beta1'],
+                                                beta2=args['beta2'],
+                                                random_seed=args['seed'])
+                    inputs, lam, target_a, target_b = rand_bbox.get_cutmiximage_and_lam()
 
-                    optimizer.zero_grad()
-                    outs = model(inputs)
-                    preds = torch.argmax(outs, dim=-1)
-                
-                    if args['cutmix']==True:
-                        loss = criterion(outs, target_a) * lam + criterion(outs, target_b) * (1. - lam)
-                    else:
-                        loss = criterion(outs, labels)
-
-                    loss.backward()
-                    optimizer.step()
-                    f1_value_item.append(get_f1_score(labels,preds).item())
-                    loss_value_item.append(loss.item())
-                    matches_item.append((preds == labels).sum().item())
-                    if (idx + 1) % args['log_interval'] == 0:
-                        train_f1 = np.sum(f1_value_item) / (idx + 1)
-                        train_loss = np.sum(loss_value_item) / (idx + 1)
-                        train_acc = np.sum(matches_item) / args['batch_size'] / (idx + 1)
-                        current_lr = get_lr(optimizer)
-                        print(
-                            f"Epoch[{epoch+1}/{args['epochs']}]({idx + 1}/{len(train_loader)}) || "
-                            f"training f1 {train_f1:4.4} ||training loss {train_loss:4.4} || training accuracy {train_acc:4.2%} || lr {current_lr}"
-                        )
-                        logger.add_scalar("Train/f1", train_f1, epoch * len(train_loader) + idx)
-                        logger.add_scalar("Train/loss", train_loss, epoch * len(train_loader) + idx)
-                        logger.add_scalar("Train/accuracy", train_acc, epoch * len(train_loader) + idx)
-                    
+                optimizer.zero_grad()
+                outs = model(inputs)
+                preds = torch.argmax(outs, dim=-1)
             
-                f1 = np.sum(f1_value_item) / len(train_loader)
-                loss = np.sum(loss_value_item) / len(train_loader)
-                acc = np.sum(matches_item) / len(sudo_dataset_train)
-                scheduler.step()
+                if args['cutmix']==True:
+                    loss = criterion(outs, target_a) * lam + criterion(outs, target_b) * (1. - lam)
+                else:
+                    loss = criterion(outs, labels)
 
-                if f1 > best_val_f1:
-                    print(f"New best model for val f1 score : {f1:4.2%}! saving the best model..")
-                    torch.save(model.module.state_dict(), f"{save_dir}/best.pth")
-                    best_val_f1 = f1
-                    best_val_acc = acc
-                    best_val_loss = loss
-                torch.save(model.module.state_dict(), f"{save_dir}/last.pth")   
+                loss.backward()
+                optimizer.step()
+                f1_value_item.append(get_f1_score(labels,preds).item())
+                loss_value_item.append(loss.item())
+                matches_item.append((preds == labels).sum().item())
+                if (idx + 1) % args['log_interval'] == 0:
+                    sudo_f1 = np.sum(f1_value_item) / (idx + 1)
+                    sudo_loss = np.sum(loss_value_item) / (idx + 1)
+                    sudo_acc = np.sum(matches_item) / args['batch_size'] / (idx + 1)
+                    current_lr = get_lr(optimizer)
+                    print(
+                        f"Epoch[{epoch+1}/{args['epochs']}]({idx + 1}/{len(sudo_loader_train)}) || "
+                        f"training f1 {sudo_f1:4.4} ||training loss {sudo_loss:4.4} || training accuracy {sudo_acc:4.2%} || lr {current_lr}"
+                    )
+                    logger.add_scalar("Train/f1", sudo_f1, epoch * len(sudo_loader_train) + idx)
+                    logger.add_scalar("Train/loss", sudo_loss, epoch * len(sudo_loader_train) + idx)
+                    logger.add_scalar("Train/accuracy", sudo_acc, epoch * len(sudo_loader_train) + idx)
+                
+        
+            f1 = np.sum(f1_value_item) / len(sudo_loader_train)
+            loss = np.sum(loss_value_item) / len(sudo_loader_train)
+            acc = np.sum(matches_item) / len(sudo_dataset_train)
+            scheduler.step()
+
+            if f1 > best_f1:
+                print(f"New best model for val f1 score : {f1:4.2%}! saving the best model..")
+                torch.save(model.module.state_dict(), f"{save_dir}/best.pth")
+                best_f1 = f1
+                best_acc = acc
+                best_loss = loss
+            torch.save(model.module.state_dict(), f"{save_dir}/last.pth")   
+
+            print(
+                f"[train] f1 : {f1:4.2%}, acc : {acc:4.2%}, loss: {loss:4.2} || "
+                f"best f1 : {best_f1:4.2%}, best acc : {best_acc:4.2%}, best loss: {best_loss:4.2}"
+            )       
+            logger.add_scalar("train/f1", f1, epoch)
+            logger.add_scalar("train/loss", loss, epoch)
+            logger.add_scalar("train/accuracy", acc, epoch)
+        
+            nni.report_intermediate_result(best_f1)
+            logger_p.debug('test accuracy(train) is %g', f1)
+            logger_p.debug('test accuracy(best) is %g', best_f1)
+    
+    nni.report_final_result(best_f1)
+    logger_p.debug('Final result(f1 score) is %g', best_f1)
+    logger_p.debug('Send final sudo beling done.')
             
 
 
@@ -405,12 +410,12 @@ def get_params():
     parser.add_argument('--epochs', type=int, default=5, help='number of epochs to train (default: 1)')
     parser.add_argument('--dataset', type=str, default='MaskSplitByProfileDataset', help='dataset augmentation type (default: MaskBaseDataset)') #
     parser.add_argument('--augmentation', type=str, default='CustomAugmentation_Max', help='data augmentation type (default: BaseAugmentation)') #CustomAugmentation
-    parser.add_argument('--resize_height', type=int, default=512, help='input batch size for training (default: 64)')# b0 224 ,b1 240 ,b2 260 ,b3 300 
-    parser.add_argument('--resize_width', type=int, default=384, help='input batch size for training (default: 64)') # b4 380 ,b5 456 ,b6 528 ,b7 600 
+    parser.add_argument('--resize_height', type=int, default=512, help='input resize_height size for resize augmentation (default: 300)')# b0 224 ,b1 240 ,b2 260 ,b3 300 
+    parser.add_argument('--resize_width', type=int, default=384, help='input resize_width size for resize augmentation (default: 300)') # b4 380 ,b5 456 ,b6 528 ,b7 600 
     parser.add_argument('--batch_size', type=int, default=16, help='input batch size for training (default: 64)')
     parser.add_argument('--valid_batch_size', type=int, default=64, help='input batch size for validing (default: 1000)')
-    parser.add_argument('--model', type=str, default='EffnetModel', help='model (EffnetModel, TimmModel)')
-    parser.add_argument('--model_type', type=str, default='b4', help='model type (range: b4_timm,b0~b7)')
+    parser.add_argument('--model', type=str, default='EffnetModel', help='model class name in model.py(EffnetModel, TimmModel)')
+    parser.add_argument('--model_type', type=str, default='b4', help='model type (range: b0~b7)')
     parser.add_argument('--optimizer', type=str, default='Adam', help='optimizer type (default: Adam)')
     parser.add_argument('--lr', type=float, default=1e-4, help='learning rate (default: 1e-3)')
     parser.add_argument('--criterion', type=str, default='cross_entropy', help='criterion type (default: cross_entropy)')
@@ -421,14 +426,14 @@ def get_params():
     parser.add_argument('--weights_type', type=str, default='None', help=' weights type (default: None)')
     parser.add_argument('--beta1', type=int, default=1, help='cutmix beta (default : 1)')
     parser.add_argument('--beta2', type=int, default=1, help='cutmix beta (default : 1)')
-    parser.add_argument('--cutmix', type=bool, default=False, help='adjust cut mix(dafault=True')
-    parser.add_argument('--threshold', type=float, default=0.7, help='threshold')
-    parser.add_argument('--epoch_sudo_labeling', type=int, default=1, help='train_with_sudo_labels')
+    parser.add_argument('--cutmix', type=bool, default=False, help='adjust cut mix option(dafault=True')
+    parser.add_argument('--threshold', type=float, default=0.7, help='sudo labeling threshold (default: 0.7)')
+    parser.add_argument('--epochs_SL', type=int, default=3, help='epochs for sudo_labelling (default: 3)')
 
     # Container environment
     parser.add_argument('--data_dir', type=str, default=os.environ.get('SM_CHANNEL_TRAIN', '/opt/ml/input/data/train/images'))
     parser.add_argument('--model_dir', type=str, default=os.environ.get('SM_MODEL_DIR', './model'))
-    parser.add_argument('--data_dir_sudo', type=str, default=os.environ.get('SM_CHANNEL_TRAIN', '/opt/ml/input/data/eval'))
+    parser.add_argument('--data_dir_sudo', type=str, default=os.environ.get('SM_CHANNEL_EVAL', '/opt/ml/input/data/eval'))
     parser.add_argument('--output_dir', type=str, default=os.environ.get('SM_OUTPUT_DATA_DIR', './output'))
     args, _ = parser.parse_known_args()
     #parse_args()와 매우 유사하지만, 여분의 인자가 있을 때 error를 발생시키지 않고, 채워진 이름 공간에 여분의 인자의 문자열 리스트를 포함하는 두 항목을 튜플로 반환

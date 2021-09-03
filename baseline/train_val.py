@@ -7,11 +7,12 @@ import random
 import re
 from importlib import import_module
 from pathlib import Path
-from collections import Counter
+import pandas as pd
 
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+import torch.nn as nn
 from torch.optim.lr_scheduler import StepLR
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
@@ -19,7 +20,7 @@ from torch.utils.tensorboard import SummaryWriter
 from dataset import MaskBaseDataset
 from loss import create_criterion
 from sklearn.metrics import f1_score
-from adamp import AdamP
+
 import nni
 import logging
 from nni.utils import merge_parameter
@@ -92,8 +93,10 @@ def increment_path(path, exist_ok=False):
 
 def train(args):
     seed_everything(args['seed'])
-
     save_dir = increment_path(os.path.join(args['model_dir'], args['name']))
+    print("*"*30)
+    print(f"{save_dir:*^30}")
+    print("*"*30)
 
     # -- settings
     use_cuda = torch.cuda.is_available()
@@ -147,17 +150,20 @@ def train(args):
     
     # -- loss & metric
     #loss weight
-    train_data_labels = train_set.dataset.output_labels
-    weights_module = getattr(import_module("utils"), "GetClassWeights")
-    weights = weights_module(train_data_labels)
-    class_weights = weights.get_weights(args['weights_type'])
-    class_weights = torch.FloatTensor(class_weights).to(device)
+    class_weights=None
+    if args['weights_type'] != None: #string으로 None이 입력됨
+        train_data_labels = train_set.dataset.output_labels
+        weights_module = getattr(import_module("utils"), "GetClassWeights")
+        weights = weights_module(train_data_labels)
+        class_weights = weights.get_weights(args['weights_type'])
+        class_weights = torch.FloatTensor(class_weights).to(device)
 
-    criterion = create_criterion(args['criterion'], weight=class_weights)  # default: cross_entropy
-    if args['optimizer'].lower()=="AdamP":
+    criterion = create_criterion(args['criterion'], weight=class_weights,reduction=args['reduction'])
+    
+    if args['optimizer'].lower()=="adamp": #different optimizer package
         opt_module = getattr(import_module("adamp"), args['optimizer'])
     else:
-        opt_module = getattr(import_module("torch.optim"), args['optimizer'])  # default: SGD
+        opt_module = getattr(import_module("torch.optim"), args['optimizer'])
     
     optimizer = opt_module(
         filter(lambda p: p.requires_grad, model.parameters()),
@@ -303,28 +309,27 @@ def get_params():
     #argparse를 사용하기 위해 argumentparser 객체 생성
     parser = argparse.ArgumentParser(description='Mask')
 
-    parser.add_argument('--seed', type=int, default=42, help='random seed (default: 42)')
+    parser.add_argument('--seed', type=int, default=37, help='random seed (default: 42)')
     parser.add_argument('--epochs', type=int, default=5, help='number of epochs to train (default: 1)')
     parser.add_argument('--dataset', type=str, default='MaskSplitByProfileDataset', help='dataset augmentation type (default: MaskBaseDataset)') #
-    parser.add_argument('--augmentation', type=str, default='CustomAugmentation1', help='data augmentation type (default: BaseAugmentation)') #CustomAugmentation
-    parser.add_argument("--resize", nargs="+", type=list, default=(512, 384), help='resize size for image when training')
-    parser.add_argument('--resize_height', type=int, default=380, help='input batch size for training (default: 64)')# b0 224 ,b1 240 ,b2 260 ,b3 300 
-    parser.add_argument('--resize_width', type=int, default=380, help='input batch size for training (default: 64)') # b4 380 ,b5 456 ,b6 528 ,b7 600 
-    parser.add_argument('--batch_size', type=int, default=32, help='input batch size for training (default: 64)')
+    parser.add_argument('--augmentation', type=str, default='CustomAugmentation_Max', help='data augmentation type (default: BaseAugmentation)') #CustomAugmentation
+    parser.add_argument('--resize_height', type=int, default=512, help='input resize_height size for resize augmentation (default: 300)')# b0 224 ,b1 240 ,b2 260 ,b3 300 
+    parser.add_argument('--resize_width', type=int, default=384, help='input resize_width size for resize augmentation (default: 300)') # b4 380 ,b5 456 ,b6 528 ,b7 600 
+    parser.add_argument('--batch_size', type=int, default=16, help='input batch size for training (default: 64)')
     parser.add_argument('--valid_batch_size', type=int, default=64, help='input batch size for validing (default: 1000)')
-    parser.add_argument('--model', type=str, default='EffnetModel', help='model (EffnetModel, TimmModel)')
-    parser.add_argument('--model_type', type=str, default='b3', help='model type (range: b4_timm,b0~b7)')
-    parser.add_argument('--optimizer', type=str, default='Adam', help='optimizer type (default: Adam)')
+    parser.add_argument('--model', type=str, default='EffnetModel', help='model class name in model.py(EffnetModel, TimmModel)')
+    parser.add_argument('--model_type', type=str, default='b4', help='model type (range: b0~b7)')
+    parser.add_argument('--optimizer', type=str, default='AdamP', help='optimizer type (default: Adam)')
     parser.add_argument('--lr', type=float, default=1e-4, help='learning rate (default: 1e-3)')
-    parser.add_argument('--val_ratio', type=float, default=0.2, help='ratio for validaton (default: 0.2)')
     parser.add_argument('--criterion', type=str, default='cross_entropy', help='criterion type (default: cross_entropy)')
+    parser.add_argument('--reduction', type=str, default='sum', help='criterion reduction type (default: mean)')
     parser.add_argument('--lr_decay_step', type=int, default=100, help='learning rate scheduler decay step (default: 20)')
     parser.add_argument('--log_interval', type=int, default=50, help='how many batches to wait before logging training status')
     parser.add_argument('--name', default='exp', help='model save at {SM_MODEL_DIR}/{name}')
-    parser.add_argument('--weights_type', type=str, default='weights_vanilla', help='weights_vanilla(1-x/sum(x)), class_weights_sklearn(len(x)/(classes*freq)) (default: weights_vanilla)')
+    parser.add_argument('--weights_type', type=str, default=None, help=' weights type (default: None)')
     parser.add_argument('--beta1', type=int, default=1, help='cutmix beta (default : 1)')
     parser.add_argument('--beta2', type=int, default=1, help='cutmix beta (default : 1)')
-    parser.add_argument('--cutmix', type=bool, default=True, help='adjust cut mix(dafault=True')
+    parser.add_argument('--cutmix', type=bool, default=False, help='adjust cut mix option(dafault=True')
     # Container environment
     parser.add_argument('--data_dir', type=str, default=os.environ.get('SM_CHANNEL_TRAIN', '/opt/ml/input/data/train/images'))
     parser.add_argument('--model_dir', type=str, default=os.environ.get('SM_MODEL_DIR', './model'))
