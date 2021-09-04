@@ -4,6 +4,12 @@ from collections import Counter
 from sklearn.preprocessing import LabelEncoder
 from train_nni_cutmix import seed_everything
 
+"""트레이닝에 필요한 다양한 함수가 있는 파일입니다.
+rand_bbox: cutmix를 위해 사진을 자르는 클래스입니다. 최석민 캠퍼분이 만든 클래스를 활용하여 만들었습니다.
+(https://stages.ai/competitions/74/discussion/talk/post/493)
+
+GetClassWeights: 라벨의 비율에 반비례해서 loss에 weight를 주는 클래스입니다.
+"""
 class rand_bbox:
     def __init__(self,inputs, labels, beta1, beta2,random_seed):
         seed_everything(random_seed)

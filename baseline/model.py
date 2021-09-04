@@ -5,6 +5,7 @@ import torch.nn.functional as F
 from collections import OrderedDict
 from efficientnet_pytorch import EfficientNet
 
+""" 모델들이 담긴 파일입니다. 모델을 불러올 라이브러리와 불러올 모델, 불러올 모델의 버전을 기입할 수 있습니다."""
 class EffnetModel(nn.Module):
     def __init__(self, num_classes, model_type):
         super().__init__()

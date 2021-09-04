@@ -26,6 +26,8 @@ import logging
 from nni.utils import merge_parameter
 logger_p = logging.getLogger('mask_AutoML')
 
+
+""" 일반적인 training을 할 수 있는 파일입니다."""
 def seed_everything(seed):
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)

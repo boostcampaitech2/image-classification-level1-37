@@ -2,6 +2,8 @@ import os
 import pandas as pd
 from collections import Counter
 import pdb
+
+"""다양한 모델로 추출한 결과를 앙상블 할 수 있는 파일입니다. inference.py에서 만든 csv파일들을 조합합니다."""
 def ensemble(file_path, ensemble_csv_list):
     #read csv files
     data = pd.read_csv(os.path.join(file_path, "info.csv"))

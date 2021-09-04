@@ -18,8 +18,8 @@ IMG_EXTENSIONS = [
     ".jpg", ".JPG", ".jpeg", ".JPEG", ".png",
     ".PNG", ".ppm", ".PPM", ".bmp", ".BMP",
 ]
-"""albumentation 라이브러리를 사용할떄는 __call__ 함수를 수정해주세요 """
-
+"""data aumentaion과 dataset 그리고 관련된 함수가 담겨있는 파일입니다.
+albumentation 라이브러리를 사용하여 data augmentation을 만들 때는 __call__ 함수를 수정해주세요 """
 
 def is_image_file(filename):
     return any(filename.endswith(extension) for extension in IMG_EXTENSIONS)
