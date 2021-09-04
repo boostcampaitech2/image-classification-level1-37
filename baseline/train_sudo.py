@@ -25,6 +25,9 @@ from sklearn.metrics import f1_score
 import nni
 import logging
 from nni.utils import merge_parameter
+
+""" pesudo labeling을 하는 트레이닝 파일입니다"""
+
 logger_p = logging.getLogger('mask_AutoML')
 
 def seed_everything(seed):
