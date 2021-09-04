@@ -18,3 +18,13 @@
 - inference.py에는 kfold로 나눠 학습한 모델를 앙상블해서 결과를 낼 수 있는 kfold_inference 함수가 있으니 kfold train을 한 경우 함수를 바꿔서 사용해주세요 
 ### Evaluation
 - `SM_GROUND_TRUTH_DIR=[GT dir] SM_OUTPUT_DATA_DIR=[inference output dir] python evaluation.py`
+-
+### 최종모델
+- Model description(T2159)
+https://towering-silkworm-c2e.notion.site/Model-description-240a220ea93d44f3b35f7d86ec74caab
+- Pretrained model(tf_efficientnet_b3,5,6)
+https://drive.google.com/drive/folders/19s_9OqbmkHvm7WLBiK1pry8SecQ1JIGr?usp=sharing
+
+- Model description(T2243)
+https://big-cut-d0b.notion.site/Model-description-4534bffb61ce4728be7d45f0afb82eef
+
