@@ -9,7 +9,7 @@ from importlib import import_module
 from pathlib import Path
 
 from sklearn.model_selection import StratifiedKFold
-
+from tqdm import tqdm 
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -24,7 +24,7 @@ from loss import create_criterion
 from adamp import AdamP
 from sklearn.metrics import f1_score
 
-"kfold로 validataion set과 training을 나눠 학습하여 해당 fold개의 모델을 저장하는 training 파일입니다."""
+"""kfold로 validataion set과 training을 나눠 학습하여 해당 fold개의 모델을 저장하는 training 파일입니다."""
 
 def seed_everything(seed):
     torch.manual_seed(seed)
@@ -139,43 +139,33 @@ def train(model_dir, args):
     # -- settings
     use_cuda = torch.cuda.is_available()
     device = torch.device("cuda" if use_cuda else "cpu")
-    # -- dataset
-    dataset_module = getattr(import_module("dataset"), args.dataset)  # default: sj_MaskDataset
+    
 
-    num_classes = 18  # 18
-
-    # -- augmentation
-    train_transform_module = getattr(import_module("dataset"), args.augmentation)  # default: sj_augmentation
-    train_transform = train_transform_module(
-        width=args.resize[0],
-        height =args.resize[1],
-    )
-    valid_transform_module = getattr(import_module("dataset"), args.valid_augmentation)  # default: sj_valid_augmentation
-    valid_transform = valid_transform_module(
-        width=args.resize[0],
-        height =args.resize[1],
-    )
-
-    for fold in range(1, (args.kfold + 1)):
+    for fold in range(1, (args.kfold + 1)): # for문을 통해 fold_index를 순차적으로 돌린다. 
 
         min_loss = 5
         early_stop = 0
         best_val_acc = 0
         best_val_f1 = 0
         best_val_loss = np.inf
-        train_image_paths, valid_image_paths = [], []
+
+        # -- dataset
+        dataset_module = getattr(import_module("dataset"), args.dataset)  # default: sj_MaskDataset
+        num_classes = 18  # 18
+
+        # -- train augmentation
+        train_transform_module = getattr(import_module("dataset"), args.augmentation)  # default: sj_augmentation
+        train_transform = train_transform_module()
+        train_image_paths = [] 
+
+        # -- train data
         for train_dir in image_dirs[fold_list[fold - 1]['train']]:
             train_image_paths.extend(glob.glob(train_dir + '/*'))
         train_dataset = dataset_module(
             image_paths=train_image_paths,
         )
-        for valid_dir in image_dirs[fold_list[fold - 1]['valid']]:
-            valid_image_paths.extend(glob.glob(valid_dir + '/*'))
-        valid_dataset = dataset_module(
-            image_paths=valid_image_paths,
-        )
         train_dataset.set_transform(train_transform)
-        valid_dataset.set_transform(valid_transform)
+        
         train_loader = DataLoader(
             train_dataset,
             batch_size=args.batch_size,
@@ -183,7 +173,18 @@ def train(model_dir, args):
             shuffle=True,
             pin_memory=use_cuda,
         )
+        # -- valid augmentation
+        valid_transform_module = getattr(import_module("dataset"), args.valid_augmentation)  # default: sj_valid_augmentation
+        valid_transform = valid_transform_module()
+            
+        valid_image_paths = []
+        for valid_dir in image_dirs[fold_list[fold - 1]['valid']]:
+            valid_image_paths.extend(glob.glob(valid_dir + '/*'))
+        valid_dataset = dataset_module(
+            image_paths=valid_image_paths,
+        )
 
+        valid_dataset.set_transform(valid_transform)
         val_loader = DataLoader(
             valid_dataset,
             batch_size=args.valid_batch_size,
@@ -201,103 +202,109 @@ def train(model_dir, args):
 
         # -- loss & metric
         criterion = create_criterion(args.criterion)  # default: cross_entropy
-        opt_module = getattr(import_module("adamp"), args.optimizer)  # default: adma
+        opt_module = getattr(import_module("adamp"), args.optimizer)  # default: adamP
         optimizer = opt_module(
             filter(lambda p: p.requires_grad, model.parameters()),
             lr=args.lr,
             weight_decay=5e-4
         )
-        scheduler = StepLR(optimizer, args.lr_decay_step, gamma=0.5)
+        # scheduler = StepLR(optimizer, args.lr_decay_step, gamma=0.5)
     #   scheduler = CosineAnnealingLR(optimizer,T_max=50)
 
         # -- logging
         logger = SummaryWriter(log_dir=save_dir)
+
         with open(os.path.join(save_dir, 'config.json'), 'w', encoding='utf-8') as f:
             json.dump(vars(args), f, ensure_ascii=False, indent=4)
 
 
         for epoch in range(args.epochs):
             # train loop
-            model.train()
-            f1_value = 0
-            loss_value = 0
-            matches = 0
-            for idx, train_batch in enumerate(train_loader):
-                inputs, labels = train_batch
-                inputs = inputs.to(device)
-                labels = labels.to(device)
+            print(f'Epoch : {epoch}')
+            with tqdm(train_loader, total=len(train_loader), unit='batch') as train_depth :
+                f1_value = 0
+                loss_value = 0
+                matches = 0
+                for idx, train_batch in enumerate(train_depth) :
+                    inputs, labels = train_batch
+                    inputs = inputs.to(device)
+                    labels = labels.to(device)
 
-                optimizer.zero_grad()
+                    model.train()
+                    optimizer.zero_grad()
+                    outs = model(inputs)
+                    preds = torch.argmax(outs, dim=-1)
+                    loss = criterion(outs, labels)
 
-                outs = model(inputs)
-                preds = torch.argmax(outs, dim=-1)
-                loss = criterion(outs, labels)
+                    loss.backward()
+                    optimizer.step()
+                    f1_value += get_f1_score(labels,preds).item()
+                    loss_value += loss.item()
+                    matches += (preds == labels).sum().item()
+                    
+                    if (idx + 1) % args.log_interval == 0:
+                        train_f1 = f1_value / args.log_interval
+                        train_loss = loss_value / args.log_interval
+                        train_acc = matches / args.batch_size / args.log_interval
+                        print(
+                            f"training f1 {train_f1:4.4} || training loss {train_loss:4.4}"
+                        )
+                        logger.add_scalar("Train/loss", train_loss, epoch * len(train_loader) + idx)
+                        logger.add_scalar("Train/accuracy", train_acc, epoch * len(train_loader) + idx)
+                        logger.add_scalar("Train/f1", train_f1, epoch * len(train_loader) + idx)
 
-                loss.backward()
-                optimizer.step()
-                f1_value += get_f1_score(labels,preds).item()
-                loss_value += loss.item()
-                matches += (preds == labels).sum().item()
-                if (idx + 1) % args.log_interval == 0:
-                    train_f1 = f1_value / args.log_interval
-                    train_loss = loss_value / args.log_interval
-                    train_acc = matches / args.batch_size / args.log_interval
-                    current_lr = get_lr(optimizer)
-                    print(
-                        f"Epoch[{epoch}/{args.epochs}]({idx + 1}/{len(train_loader)}) || "
-                        f"training f1 {train_f1:4.4} || training loss {train_loss:4.4} || training accuracy {train_acc:4.2%} || lr {current_lr}"
-                    )
-                    logger.add_scalar("Train/loss", train_loss, epoch * len(train_loader) + idx)
-                    logger.add_scalar("Train/accuracy", train_acc, epoch * len(train_loader) + idx)
-                    logger.add_scalar("Train/f1", train_f1, epoch * len(train_loader) + idx)
+                        loss_value = 0
+                        matches = 0
+                        f1_value = 0
 
-                    loss_value = 0
-                    matches = 0
-                    f1_value = 0
-
-            scheduler.step()
+            # scheduler.step()
         # val loop
-            with torch.no_grad():
-                print("Calculating validation results...")
-                model.eval()
+            with tqdm(val_loader, total=len(val_loader), unit='batch') as val_depth :
                 val_f1_items = []
                 val_loss_items = []
                 val_acc_items = []
+            
+                print("Calculating validation results...")
+                
+                
                 figure = None
-                for val_batch in val_loader:
+                for idx, val_batch in enumerate(val_depth):
                     inputs, labels = val_batch
                     inputs = inputs.to(device)
                     labels = labels.to(device)
 
-                    outs = model(inputs)
-                    preds = torch.argmax(outs, dim=-1)
-                    f1_item = get_f1_score(labels,preds).item()
-                    loss_item = criterion(outs, labels).item()
-                    acc_item = (labels == preds).sum().item()
-                    val_f1_items.append(f1_item)
-                    val_loss_items.append(loss_item)
-                    val_acc_items.append(acc_item)
+                    model.eval()
+                    optimizer.zero_grad()
+                    with torch.no_grad():
+                        outs = model(inputs)
+                        preds = torch.argmax(outs, dim=-1)
+                        f1_item = get_f1_score(labels,preds).item()
+                        loss_item = criterion(outs, labels).item()
+                        acc_item = (labels == preds).sum().item()
+                        
+                        val_f1_items.append(f1_item)
+                        val_loss_items.append(loss_item)
+                        val_acc_items.append(acc_item)
 
-                    if (idx + 1) % 4 == 0:
-                        val_f1_tmp = np.sum(val_f1_items) / (idx+1)
-                        val_loss_tmp = np.sum(val_loss_items) / (idx+1)
-                        val_acc_tmp = np.sum(val_acc_items) / args['valid_batch_size'] / (idx+1)
-                        current_lr = get_lr(optimizer)
-                        print(
-                            f"Epoch[{epoch+1}/{args['epochs']}]({idx + 1}/{len(val_loader)}) || "
-                            f"training f1 {val_f1_tmp:4.4} ||training loss {val_loss_tmp:4.4} || training accuracy {val_acc_tmp:4.2%} || lr {current_lr}"
-                        )
+                        if (idx + 1) % 4 == 0:
+                            val_f1_tmp = np.sum(val_f1_items) / (idx+1)
+                            val_loss_tmp = np.sum(val_loss_items) / (idx+1)
+                            
+                            print(
+                                f"Epoch[{epoch+1}/{args.epochs}]({idx + 1}/{len(val_loader)}) || "
+                                f"validation f1 {val_f1_tmp:4.4} || validation loss {val_loss_tmp:4.4}"
+                            )
 
-                    if figure is None:
-                        inputs_np = torch.clone(inputs).detach().cpu().permute(0, 2, 3, 1).numpy()
-                        inputs_np = dataset_module.denormalize_image(inputs_np, train_dataset.mean, train_dataset.std)
-                        figure = grid_image(
-                            inputs_np, labels, preds, n=16, shuffle=args.dataset != "MaskSplitByProfileDataset"
+                        if figure is None:
+                            inputs_np = torch.clone(inputs).detach().cpu().permute(0, 2, 3, 1).numpy()
+                            inputs_np = dataset_module.denormalize_image(inputs_np, train_dataset.mean, train_dataset.std)
+                            figure = grid_image(
+                                inputs_np, labels, preds, n=16, shuffle=args.dataset != "MaskSplitByProfileDataset"
                         )
-                val_f1 = np.sum(val_f1_items) / len(val_loader)
-                val_loss = np.sum(val_loss_items) / len(val_loader)
-                val_acc = np.sum(val_acc_items) / len(valid_dataset)
-                best_val_loss = min(best_val_loss, val_loss)
+                    val_f1 = np.sum(val_f1_items) / len(val_loader)
+                    val_loss = np.sum(val_loss_items) / len(val_loader)
+                    val_acc = np.sum(val_acc_items) / len(valid_dataset)
+                    best_val_loss = min(best_val_loss, val_loss)
 
                 if val_f1 > best_val_f1:
                     print(f"New best model for val f1 score : {val_f1:4.2%}! saving the best model..")
@@ -315,7 +322,7 @@ def train(model_dir, args):
                 logger.add_scalar("Val/loss", val_loss, epoch)
                 logger.add_scalar("Val/accuracy", val_acc, epoch)
                 logger.add_figure("results", figure, epoch)
-                # print()
+            # print()
 
             # 조기종료 조건 : 학습에서 Loss가 5번 이상 줄지 않으면 조기종료
             if val_loss < min_loss :
@@ -339,8 +346,8 @@ if __name__ == '__main__':
     parser.add_argument('--seed', type=int, default=37, help='random seed (default: 37)')
     parser.add_argument('--epochs', type=int, default=10, help='number of epochs to train (default: 10)')
     parser.add_argument('--dataset', type=str, default='sj_MaskDataset', help='dataset augmentation type (default: MaskBaseDataset)')
-    parser.add_argument('--augmentation', type=str, default='sj_augmentation', help='data augmentation type (default: BaseAugmentation)')
-    parser.add_argument('--valid_augmentation', default='sj_valid_augmentation', help='model save at {SM_MODEL_DIR}/{name}')
+    parser.add_argument('--augmentation', type=str, default='sj_augmentation', help='train data augmentation type (default: BaseAugmentation)')
+    parser.add_argument('--valid_augmentation', default='sj_valid_augmentation', help='valid data augmentation type')
     parser.add_argument("--resize", nargs="+", type=list, default=[300, 300], help='resize size for image when training')
     parser.add_argument('--batch_size', type=int, default=32, help='input batch size for training (default: 32)')
     parser.add_argument('--valid_batch_size', type=int, default=32, help='input batch size for validing (default: 1000)')
@@ -351,9 +358,9 @@ if __name__ == '__main__':
     parser.add_argument('--lr', type=float, default=1e-4, help='learning rate (default: 1e-4)')
     parser.add_argument('--val_ratio', type=float, default=0.2, help='ratio for validaton (default: 0.2)')
     parser.add_argument('--criterion', type=str, default='cross_entropy', help='criterion type (default: cross_entropy)')
-    parser.add_argument('--lr_decay_step', type=int, default=20, help='learning rate scheduler deacy step (default: 20)')
+    # parser.add_argument('--lr_decay_step', type=int, default=20, help='learning rate scheduler deacy step (default: 20)')
     parser.add_argument('--log_interval', type=int, default=20, help='how many batches to wait before logging training status')
-    parser.add_argument('--name', default='exp', help='model save at {SM_MODEL_DIR}/{name}')
+    parser.add_argument('--name', default='skf', help='model save at {SM_MODEL_DIR}/{name}')
     
     # Container environment
     # parser.add_argument('--data_dir', type=str, default=os.environ.get('SM_CHANNEL_TRAIN', '/opt/ml/input/data/train/images'))
@@ -365,3 +372,4 @@ if __name__ == '__main__':
     # data_dir = args.data_dir
     model_dir = args.model_dir
     train(model_dir, args)
+
