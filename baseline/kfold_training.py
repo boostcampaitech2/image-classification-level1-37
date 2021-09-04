@@ -99,7 +99,7 @@ def increment_path(path, exist_ok=False):
 # 나이와 성별 구분이 문제니까 이 두 개를 기준으로 나눠서 stratified_kfold를 사용하면 imbalance를 조금 방지할 수 있지 않을까?
 # 나이 성별 정보만 이용해서 데이터 나누기 위한 함수 (label_fold)
 # 나이가 60세 이상 정보가 너무 부족하니까 학습시에 나이 58을 기준으로 나눠서 진행
-# 18개의 class를 따로 나눠서 데이터 셋을 나누는 것 보다 교집합이 있는 부분을 활용하기 위함
+# 18개의 class를 따로 나눠서 데이터 셋을 나누는 것 보다 교집합이 있는 부분을 활용하기 위함 
 
 def label_fold(image_dirs,seed): 
     stratified_kfold_label = []
