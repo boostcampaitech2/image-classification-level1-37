@@ -130,7 +130,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
     # Data and model checkpoints directories
-    parser.add_argument('--batch_size', type=int, default=64, help='input batch size for validing (default: 1000), sj_model : 16')
+    parser.add_argument('--batch_size', type=int, default=64, help='input batch size for validing (default: 64), sj_model : 16')
     parser.add_argument('--height', type=int, default=244, help='resize height for image when you trained ')
     parser.add_argument('--width', type=int, default=224, help='resize width for image when you trained')
     parser.add_argument('--model', type=str, default='EffnetModel', help='model (EffnetModel, TimmModel,sj_model)')
