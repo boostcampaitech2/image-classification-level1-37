@@ -1,5 +1,7 @@
 # pstage_01_image_classification
 ## 사진을 보고 사진에 있는 사람의 나이, 성별, 마스크착용 유무를 판단하는 classification입니다. 이를 18개의 클래스로 나누어 출력합니다.
+![image](https://user-images.githubusercontent.com/87692784/132092361-05e5c599-b112-446d-9bf0-0cf94274ac74.png)
+
 ## Getting Started    
 ### Dependencies
 - torch==1.6.0
