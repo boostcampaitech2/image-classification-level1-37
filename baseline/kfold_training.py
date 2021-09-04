@@ -24,6 +24,7 @@ from loss import create_criterion
 from adamp import AdamP
 from sklearn.metrics import f1_score
 
+"kfold로 validataion set과 training을 나눠 학습하여 해당 fold개의 모델을 저장하는 training 파일입니다."""
 
 def seed_everything(seed):
     torch.manual_seed(seed)
