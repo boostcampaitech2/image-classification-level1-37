@@ -7,7 +7,7 @@ import pandas as pd
 import torch
 from torch.utils.data import DataLoader
 
-from dataset import TestDataset, MaskBaseDataset
+from dataset import TestDataset, MaskBaseDataset, sj_TestDataset
 
 
 def load_model(saved_model, num_classes, device):
@@ -26,17 +26,18 @@ def load_model(saved_model, num_classes, device):
 
     return model
 
-def kfold_load_model(saved_model, num_classes, device,fold):
+def kfold_load_model(saved_model, num_classes, device):
     model_cls = getattr(import_module("model"), args.model)
     model = model_cls(
         num_classes=num_classes,
+        model_type = args.model_type
     )
 
     # tarpath = os.path.join(saved_model, 'best.tar.gz')
     # tar = tarfile.open(tarpath, 'r:gz')
     # tar.extractall(path=saved_model)
 
-    model_path = os.path.join(saved_model, 'best'+str(fold)+'.pth')
+    model_path = os.path.join(saved_model, 'best.pth')
     model.load_state_dict(torch.load(model_path, map_location=device))
 
     return model
@@ -81,6 +82,7 @@ def inference(data_dir, model_dir, output_dir, args):
     info.to_csv(os.path.join(output_dir, f'output.csv'), index=False)
     print(f'Inference Done!')
 
+
 @torch.no_grad()
 def kfold_inference(data_dir, model_dir, output_dir, args):
     """
@@ -95,82 +97,33 @@ def kfold_inference(data_dir, model_dir, output_dir, args):
     img_root = os.path.join(data_dir, 'images')
     info_path = os.path.join(data_dir, 'info.csv')
     info = pd.read_csv(info_path)
+    img_paths = [os.path.join(img_root, img_id) for img_id in info.ImageID]
+    dataset = sj_TestDataset(img_paths)
+    loader = torch.utils.data.DataLoader(
+        dataset,
+        batch_size=args.batch_size,
+        num_workers=8,
+        shuffle=False,
+        pin_memory=use_cuda,
+        drop_last=False,
+    )
 
-    for fold in range(args.kflod):
-        model = load_model(model_dir, num_classes, device,fold).to(device)
-        model.eval()
-
-
-        img_paths = [os.path.join(img_root, img_id) for img_id in info.ImageID]
-        dataset = TestDataset(img_paths, height=args.height, width=args.width)
-        loader = torch.utils.data.DataLoader(
-            dataset,
-            batch_size=args.batch_size,
-            num_workers=8,
-            shuffle=False,
-            pin_memory=use_cuda,
-            drop_last=False,
-        )
-
-        print(fold,"Calculating inference results..")
-        preds = []
-        with torch.no_grad():
-            for idx, images in enumerate(loader):
-                images = images.to(device)
-                pred = model(images)
-                pred = pred.argmax(dim=-1)
-                preds.extend(pred.cpu().numpy())
-
-        all_predictions.append(np.array(preds)[..., np.newaxis])
-    np.argmax(np.mean(np.concatenate(all_predictions, axis=2), axis=2), axis=1)
-
-    info['ans'] = np.argmax(np.mean(np.concatenate(all_predictions, axis=2), axis=2), axis=1)
-    info.to_csv(os.path.join(output_dir, f'output.csv'), index=False)
-    print(f'Inference Done!')
+    model = kfold_load_model(model_dir, num_classes, device).to(device)
+    model.eval()
     
-@torch.no_grad()
-def kfold_inference(data_dir, model_dir, output_dir, args):
-    """
-    """
-    # import pdb;pdb.set_trace()
-    use_cuda = torch.cuda.is_available()
-    device = torch.device("cuda" if use_cuda else "cpu")
 
-    num_classes = 18  # 18
-    all_predictions = []
+    print("Calculating inference results..")
+    prediction_array = []
+    with torch.no_grad():
+        for idx, images in enumerate(loader):
+            images = images.to(device)
+            pred = model(images)
+            pred = pred.cpu().detach().numpy()
+            prediction_array.extend(pred)
 
-    img_root = os.path.join(data_dir, 'images')
-    info_path = os.path.join(data_dir, 'info.csv')
-    info = pd.read_csv(info_path)
-
-    for fold in range(args.kfold):
-        model = load_model(model_dir, num_classes, device,fold).to(device)
-        model.eval()
-
-
-        img_paths = [os.path.join(img_root, img_id) for img_id in info.ImageID]
-        dataset = TestDataset(img_paths, height=args.height, width=args.width)
-        loader = torch.utils.data.DataLoader(
-            dataset,
-            batch_size=args.batch_size,
-            num_workers=8,
-            shuffle=False,
-            pin_memory=use_cuda,
-            drop_last=False,
-        )
-
-        print(fold,"Calculating inference results..")
-        prediction_array = []
-        with torch.no_grad():
-            for idx, images in enumerate(loader):
-                images = images.to(device)
-                pred = model(images)
-                pred = pred.cpu().detach().numpy()
-                prediction_array.extend(pred)
-
-        all_predictions.append(np.array(prediction_array)[..., np.newaxis])
-        info['ans'] = np.argmax(np.mean(np.concatenate(all_predictions, axis=2), axis=2), axis=1)
-    info.to_csv(os.path.join(output_dir, f'output.csv'), index=False)
+    all_predictions.append(np.array(prediction_array)[..., np.newaxis])
+    info['ans'] = np.argmax(np.mean(np.concatenate(all_predictions, axis=2), axis=2), axis=1)
+    info.to_csv(os.path.join(output_dir, f'outputkfold.csv'), index=False)
     print(f'Inference Done!')
 
 if __name__ == '__main__':
@@ -198,3 +151,5 @@ if __name__ == '__main__':
     os.makedirs(output_dir, exist_ok=True)
 
     inference(data_dir, model_dir, output_dir, args)
+    # 만약 kfold 방식으로 진행하고자 한다면
+    # kfold_inference(data_dir, model_dir, output_dir, args)
